@@ -34,8 +34,8 @@
   "author": "WYRE Technology",
   "license": "Apache-2.0",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0",
-    "@wyre-technology/node-kaseya-quote-manager": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@wyre-technology/node-kaseya-quote-manager": "^1.0.2"
   },
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.3",
