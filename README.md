@@ -1,6 +1,6 @@
 # Kaseya Quote Manager MCP Server
 
-[![Build Status](https://github.com/wyre-technology/kaseya-quote-manager-mcp/actions/workflows/release.yml/badge.svg)](https://github.com/wyre-technology/kaseya-quote-manager-mcp/actions/workflows/release.yml)
+[![Build Status](https://github.com/WYRE-AI/kaseya-quote-manager-mcp/actions/workflows/release.yml/badge.svg)](https://github.com/WYRE-AI/kaseya-quote-manager-mcp/actions/workflows/release.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 
@@ -8,13 +8,13 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that g
 assistants **read-only** access to [Kaseya Quote Manager](https://help.quotemanager.kaseya.com/)
 (Datto Commerce) — quotes, sales orders, purchasing, the product catalog, and customers.
 
-> Maintained by [Wyre Technology](https://github.com/wyre-technology).
+> Maintained by [Wyre Technology](https://github.com/WYRE-AI).
 
 ## Quick Start
 
 **Claude Desktop** — download, open, done:
 
-1. Download `kaseya-quote-manager-mcp.mcpb` from the [latest release](https://github.com/wyre-technology/kaseya-quote-manager-mcp/releases/latest)
+1. Download `kaseya-quote-manager-mcp.mcpb` from the [latest release](https://github.com/WYRE-AI/kaseya-quote-manager-mcp/releases/latest)
 2. Open the file (double-click or drag into Claude Desktop)
 3. Enter your Kaseya Quote Manager **API Key** when prompted
 
@@ -23,7 +23,7 @@ assistants **read-only** access to [Kaseya Quote Manager](https://help.quotemana
 ```bash
 claude mcp add kaseya-quote-manager-mcp \
   -e KASEYA_QUOTE_MANAGER_API_KEY=your-api-key \
-  -- npx -y github:wyre-technology/kaseya-quote-manager-mcp
+  -- npx -y github:WYRE-AI/kaseya-quote-manager-mcp
 ```
 
 ## Authentication
