@@ -66,7 +66,7 @@ export function createServer(): Server {
           text: JSON.stringify({
             connected: !!creds,
             domains: DOMAINS,
-            status: 'All tools available, no domain selected',
+            status: 'No domain selected. Call conduit__my_access to see which tools you can use under the gateway, or kqm_navigate to browse tools by domain when running standalone.',
           }, null, 2),
         }],
       };
@@ -90,7 +90,7 @@ export function createServer(): Server {
     }
 
     return {
-      content: [{ type: 'text' as const, text: `Unknown tool: ${name}. Use kqm_navigate to discover available tools.` }],
+      content: [{ type: 'text' as const, text: `Unknown tool: ${name}. Call conduit__my_access to see which tools you can use under the gateway, or kqm_navigate to browse available tools when running standalone.` }],
       isError: true,
     };
   });
