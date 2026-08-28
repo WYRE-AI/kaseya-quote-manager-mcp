@@ -29,3 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   strings now point to `conduit__my_access` for gateway callers and keep
   `kqm_navigate` as the standalone-mode discovery path. The tool itself is
   unchanged. (WYRE-AI/conduit#1236)
+
+### Tests
+
+- Handler-level unit tests for all 5 domain modules (`sales`, `procurement`, `catalog`,
+  `crm`, `org`), covering all 39 entity tools. Each test mocks the underlying
+  `KaseyaQuoteManagerClient` and invokes the exported `handleCall` directly, asserting
+  both the outbound request shape (method + mapped params/id) and the response
+  transformation, plus the unknown-tool and rejected-API-call paths. Domain handler
+  files (`src/domains/{sales,procurement,catalog,crm,org}.ts`) go from ~5-10% to 100%
+  statement coverage.
