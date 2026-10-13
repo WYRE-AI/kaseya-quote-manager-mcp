@@ -52,12 +52,14 @@ const ENV_KEYS = [
 const savedEnv = new Map<string, string | undefined>();
 const servers: Array<{ close: () => Promise<void> }> = [];
 
+/** Build an `X-Gateway-S2S` value: `t=<unix seconds>,v1=<hmac-sha256 hex>`. */
 function mintS2sHeader(secret: string, unixSeconds = Math.floor(Date.now() / 1000)): string {
   const message = `t=${unixSeconds}`;
   const hex = createHmac('sha256', secret).update(message).digest('hex');
   return `${message},v1=${hex}`;
 }
 
+/** Capture `console.error` lines until `restore()` is called. */
 function captureStderr(): { text: () => string; restore: () => void } {
   const lines: string[] = [];
   const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
@@ -69,12 +71,14 @@ function captureStderr(): { text: () => string; restore: () => void } {
   };
 }
 
+/** Stub `process.exit` so a startup refusal throws instead of ending the test process. */
 function mockExit() {
   return vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
     throw new Error(`process.exit:${String(code)}`);
   }) as typeof process.exit);
 }
 
+/** Assert `text` does not contain the fixture S2S secret or API keys. */
 function assertNoSecrets(text: string, extra: string[] = []): void {
   expect(text).not.toContain(S2S_SECRET);
   expect(text).not.toContain(ENV_API_KEY);
@@ -89,6 +93,7 @@ interface HttpResult {
   body: string;
 }
 
+/** Send one HTTP request to the test server and return the status and body. */
 function sendHttp(options: {
   port: number;
   method: string;
@@ -125,6 +130,7 @@ function sendHttp(options: {
   });
 }
 
+/** Start the HTTP server on an ephemeral port and register it for cleanup. */
 async function listen(): Promise<{ port: number; address: string; close: () => Promise<void> }> {
   const server = await startHttpServer();
   const bound = server.address() as AddressInfo | null;
@@ -142,6 +148,7 @@ async function listen(): Promise<{ port: number; address: string; close: () => P
   return handle;
 }
 
+/** JSON and SSE headers required by the MCP HTTP transport. */
 function mcpHeaders(extra?: Record<string, string>): Record<string, string> {
   return {
     'content-type': 'application/json',

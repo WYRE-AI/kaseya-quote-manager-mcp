@@ -151,15 +151,27 @@ warning. A non-loopback `MCP_HTTP_HOST` is overridden:
 MCP_TRANSPORT=http MCP_ALLOW_INSECURE_DEV=1 npm run start:http
 ```
 
-Sign a gateway request with `X-Gateway-S2S` (`t` plus HMAC-SHA256 as hex) and the API key
-header:
+Sign a gateway request with `X-Gateway-S2S` and the API key header. Build the header
+first: `v1` is HMAC-SHA256 of the exact ASCII string `t=<unix seconds>` (no trailing
+newline), keyed with `CONDUIT_S2S_SECRET`, as 64 lowercase hex characters.
 
 ```bash
+: "${CONDUIT_S2S_SECRET:?Set CONDUIT_S2S_SECRET to the server secret}"
+: "${KASEYA_QUOTE_MANAGER_API_KEY:?Set KASEYA_QUOTE_MANAGER_API_KEY to the Quote Manager API key}"
+timestamp="$(date +%s)"
+digest="$(
+  printf 't=%s' "$timestamp" |
+    openssl dgst -sha256 -hmac "$CONDUIT_S2S_SECRET" |
+    awk '{print $NF}' |
+    tr '[:upper:]' '[:lower:]'
+)"
+X_GATEWAY_S2S="t=${timestamp},v1=${digest}"
+
 curl -sS http://127.0.0.1:8080/mcp \
   -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \
-  -H "x-gateway-s2s: $X_GATEWAY_S2S" \
-  -H "x-kaseya-quote-manager-api-key: $KASEYA_QUOTE_MANAGER_API_KEY" \
+  -H "x-gateway-s2s: ${X_GATEWAY_S2S}" \
+  -H "x-kaseya-quote-manager-api-key: ${KASEYA_QUOTE_MANAGER_API_KEY}" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"kqm_status","arguments":{}}}'
 ```
 

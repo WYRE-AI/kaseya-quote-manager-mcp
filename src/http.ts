@@ -51,16 +51,19 @@ const GATEWAY_CREDENTIALS_UNAUTHORIZED = {
   error: 'Unauthorized: missing required gateway credential header x-kaseya-quote-manager-api-key',
 };
 
+/** First non-empty string in a Node request header, or undefined when it is absent. */
 function headerValue(value: string | string[] | undefined): string | undefined {
   const raw = Array.isArray(value) ? value[0] : value;
   return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
 }
 
+/** True for 127.0.0.1, localhost, and ::1, including a bracketed IPv6 literal. */
 function isLoopbackHost(host: string): boolean {
   const normalized = host.trim().toLowerCase().replace(/^\[(.+)\]$/, '$1');
   return normalized === '127.0.0.1' || normalized === 'localhost' || normalized === '::1';
 }
 
+/** Log `message` and exit the process with status 1. Does not return. */
 function refuseStart(message: string): never {
   logger.error(message);
   process.exit(1);
@@ -106,6 +109,10 @@ function resolveListenHost(s2sSecret: string): string {
   return LOOPBACK_HOST;
 }
 
+/**
+ * Bind the HTTP MCP listener. `/mcp` requires S2S, and gateway mode also
+ * requires a per-request API key.
+ */
 export async function startHttpServer(): Promise<HttpServer> {
   const s2sSecret = resolveS2sSecret();
   const port = parseInt(process.env.MCP_HTTP_PORT || '8080', 10);

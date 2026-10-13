@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   header injection.
 - Built on `@wyre-technology/node-kaseya-quote-manager`.
 
+### Security
+
+- HTTP MCP fails closed when `CONDUIT_S2S_SECRET` is empty or a known placeholder
+  (CWE-306). `/mcp` requires `X-Gateway-S2S` (`t=<unix seconds>,v1=<hmac-sha256 hex>`).
+  `AUTH_MODE=gateway` requires `X-Kaseya-Quote-Manager-Api-Key` on each request and does
+  not fall back to `KASEYA_QUOTE_MANAGER_API_KEY`. `MCP_ALLOW_INSECURE_DEV=1` is local
+  development only, skips S2S checks, and binds `127.0.0.1`. Docker and Compose publish
+  the port on loopback and require the S2S secret; the gateway service has no static API key.
+
 ### Fixed
 
 - **`kqm_status` and the unknown-tool error advised calling `kqm_navigate` to
