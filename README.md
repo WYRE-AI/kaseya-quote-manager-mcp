@@ -114,10 +114,15 @@ The image listens on `0.0.0.0` inside the container (`MCP_HTTP_HOST`) and defaul
 the API key arrives on each request as `X-Kaseya-Quote-Manager-Api-Key`. It is not read
 from the environment.
 
+Generate the secret once, export it, and reuse it for the server and for signing requests.
+`-e CONDUIT_S2S_SECRET` (name only) passes the exported value without putting it in the
+`docker` command line.
+
 ```bash
+export CONDUIT_S2S_SECRET="$(openssl rand -hex 32)"
 docker build -t kaseya-quote-manager-mcp .
 docker run --rm \
-  -e CONDUIT_S2S_SECRET="$(openssl rand -hex 32)" \
+  -e CONDUIT_S2S_SECRET \
   -p 127.0.0.1:8080:8080 \
   kaseya-quote-manager-mcp
 # Health: curl localhost:8080/health
@@ -128,7 +133,8 @@ does not pass `KASEYA_QUOTE_MANAGER_API_KEY`, and publishes `127.0.0.1:8080:8080
 A project `.env` is interpolation only — the gateway service has no `env_file`.
 
 ```bash
-CONDUIT_S2S_SECRET="$(openssl rand -hex 32)" docker compose up
+# Reuses the CONDUIT_S2S_SECRET exported above.
+docker compose up
 ```
 
 Single-tenant HTTP (`AUTH_MODE=env`) still requires the S2S secret, then uses
@@ -136,7 +142,7 @@ Single-tenant HTTP (`AUTH_MODE=env`) still requires the S2S secret, then uses
 
 ```bash
 docker run --rm \
-  -e CONDUIT_S2S_SECRET="$(openssl rand -hex 32)" \
+  -e CONDUIT_S2S_SECRET \
   -e AUTH_MODE=env \
   -e KASEYA_QUOTE_MANAGER_API_KEY=your-api-key \
   -e MCP_HTTP_HOST=0.0.0.0 \
@@ -153,7 +159,12 @@ MCP_TRANSPORT=http MCP_ALLOW_INSECURE_DEV=1 npm run start:http
 
 Sign a gateway request with `X-Gateway-S2S` and the API key header. Build the header
 first: `v1` is HMAC-SHA256 of the exact ASCII string `t=<unix seconds>` (no trailing
-newline), keyed with `CONDUIT_S2S_SECRET`, as 64 lowercase hex characters.
+newline), keyed with `CONDUIT_S2S_SECRET`, as 64 lowercase hex characters. Use the same
+exported `CONDUIT_S2S_SECRET` the server was started with.
+
+> `openssl dgst -hmac` takes the key as a process argument, so other local users can see it
+> in the process list while it runs. Only run this example on a trusted single-user machine;
+> elsewhere, sign requests from code that reads the secret from the environment.
 
 ```bash
 : "${CONDUIT_S2S_SECRET:?Set CONDUIT_S2S_SECRET to the server secret}"
