@@ -14,10 +14,11 @@
  * here. This function doesn't need to know that; it just checks whatever
  * secret it's handed.
  *
- * Empty secret => always returns false. The caller is expected to treat an
- * empty CONDUIT_S2S_SECRET as "S2S enforcement disabled" (dark-by-default,
- * matches the dormant/pre-provisioning state) rather than calling this at
- * all — see the enforcement check in http.ts.
+ * Empty secret => always returns false. That is not a production bypass:
+ * the HTTP transport refuses to start when CONDUIT_S2S_SECRET is empty or a
+ * known placeholder, unless MCP_ALLOW_INSECURE_DEV=1 (placeholders never
+ * qualify). That bypass is local development only and listens on 127.0.0.1.
+ * See the enforcement check in http.ts.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 
@@ -26,6 +27,11 @@ export const S2S_HEADER = "x-gateway-s2s";
 
 const HEADER_VALUE_RE = /^t=(\d{1,15}),v1=([0-9a-f]{64})$/;
 
+/**
+ * True when `headerValue` is `t=<unix seconds>,v1=<hmac-sha256 hex of that prefix>`,
+ * the hex matches `secret`, and the timestamp is within `maxSkewSeconds` of now.
+ * An empty secret or header is always false.
+ */
 export function verifyS2sHeader(
   headerValue: string | undefined,
   secret: string,

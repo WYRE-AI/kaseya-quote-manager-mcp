@@ -1,5 +1,11 @@
 
 services:
+  # Gateway mode. The Quote Manager API key arrives per request on
+  # x-kaseya-quote-manager-api-key. Do not set KASEYA_QUOTE_MANAGER_API_KEY
+  # or env_file here — that would put a static vendor credential in the
+  # container. The project .env is used only for Compose interpolation.
+  # For AUTH_MODE=env, pass KASEYA_QUOTE_MANAGER_API_KEY on that process
+  # instead (see the README).
   kaseya-quote-manager-mcp:
     build:
       context: .
@@ -8,23 +14,18 @@ services:
     image: kaseya-quote-manager-mcp:latest
     container_name: kaseya-quote-manager-mcp-server
     restart: unless-stopped
-    env_file:
-      - .env
     environment:
-      # Required Kaseya Quote Manager credentials (set these in .env file)
-      - KASEYA_QUOTE_MANAGER_API_KEY=${KASEYA_QUOTE_MANAGER_API_KEY}
-      
-      # Optional configuration
       - MCP_SERVER_NAME=${MCP_SERVER_NAME:-kaseya-quote-manager-mcp}
       - MCP_SERVER_VERSION=${MCP_SERVER_VERSION:-1.0.0}
-      
-      # Logging configuration
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - NODE_ENV=production
       - MCP_TRANSPORT=http
       - MCP_HTTP_PORT=8080
+      - MCP_HTTP_HOST=0.0.0.0
+      - AUTH_MODE=gateway
+      - CONDUIT_S2S_SECRET=${CONDUIT_S2S_SECRET:?set CONDUIT_S2S_SECRET}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       # Mount logs directory for persistence
       - kaseya-quote-manager-mcp-logs:/app/logs
