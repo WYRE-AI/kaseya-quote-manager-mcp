@@ -29,7 +29,49 @@ claude mcp add kaseya-quote-manager-mcp \
 ## Authentication
 
 Quote Manager authenticates with a single **API key** sent in the `apiKey` header. Generate
-one in Quote Manager under **Settings → API**. Set it as `KASEYA_QUOTE_MANAGER_API_KEY`.
+one in Quote Manager under **Settings → API**.
+
+Stdio and `AUTH_MODE=env` read `KASEYA_QUOTE_MANAGER_API_KEY`. The HTTP transport does not
+start unless `CONDUIT_S2S_SECRET` is a real value. Known placeholders (`changeme`,
+`change-me`, `secret`, `example`, `placeholder`, `replace-me`, `your-secret`,
+`your-s2s-secret`, `s2s-secret`, `replace-with-a-real-secret`) are rejected, including when
+`MCP_ALLOW_INSECURE_DEV=1` is set. The process never logs the secret.
+
+### HTTP authentication
+
+With `MCP_TRANSPORT=http` and a configured secret, every `/mcp` request must include
+`X-Gateway-S2S`:
+
+```
+X-Gateway-S2S: t=<unix seconds>,v1=<64 lowercase hex chars>
+```
+
+`v1` is HMAC-SHA256 of the exact ASCII string `t=<unix seconds>` (the same prefix that
+appears in the header), keyed with `CONDUIT_S2S_SECRET`, encoded as 64 lowercase hex
+characters. The timestamp must be within 300 seconds of the server clock. A missing or
+invalid header returns 401.
+
+In `AUTH_MODE=gateway` (the container image and Compose default), `/mcp` also requires
+`X-Kaseya-Quote-Manager-Api-Key`. That header is the only credential for the request. A
+request without it returns 401 and does not fall back to `KASEYA_QUOTE_MANAGER_API_KEY`.
+
+`/health` stays unauthenticated, does not require `X-Gateway-S2S`, and does not return the
+API key. The stdio transport does not use `CONDUIT_S2S_SECRET`.
+
+## Configuration
+
+Copy [`.env.example`](.env.example).
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `KASEYA_QUOTE_MANAGER_API_KEY` | For stdio and `AUTH_MODE=env` | Quote Manager API key. Gateway mode does not read this. |
+| `MCP_TRANSPORT` | No | `stdio` (default) or `http` |
+| `AUTH_MODE` | No | `gateway` (Docker image and Compose default) or `env`. Gateway mode requires `X-Kaseya-Quote-Manager-Api-Key` on each `/mcp` request and never falls back to the environment variable. |
+| `CONDUIT_S2S_SECRET` | Yes for HTTP | Service-to-service secret. The HTTP server logs an error and exits non-zero when this is empty or a known placeholder. Compose will not start without it. Never commit a real value. |
+| `MCP_ALLOW_INSECURE_DEV` | No | Set to exactly `1` only for local development to start HTTP without `CONDUIT_S2S_SECRET`. The process logs a warning, does not enforce `X-Gateway-S2S`, and binds `127.0.0.1` only. A non-loopback `MCP_HTTP_HOST` is overridden and logged. A placeholder secret still refuses to start. |
+| `MCP_HTTP_HOST` | No | Bind address when a secret is configured. Defaults to `127.0.0.1`. The container image sets `0.0.0.0`. Ignored in favor of `127.0.0.1` when the insecure-dev bypass is on. |
+| `MCP_HTTP_PORT` | No | HTTP port. Defaults to `8080`. |
+| `LOG_LEVEL` | No | `debug`, `info`, `warn`, or `error`. Defaults to `info`. |
 
 ## Features
 
@@ -67,17 +109,82 @@ kqm_quote_section_list { "quoteID": 12345 }
 
 ## Docker
 
+The image listens on `0.0.0.0` inside the container (`MCP_HTTP_HOST`) and defaults to
+`AUTH_MODE=gateway`. Publish the port on loopback and pass the S2S secret. In gateway mode
+the API key arrives on each request as `X-Kaseya-Quote-Manager-Api-Key`. It is not read
+from the environment.
+
+Generate the secret once, export it, and reuse it for the server and for signing requests.
+`-e CONDUIT_S2S_SECRET` (name only) passes the exported value without putting it in the
+`docker` command line.
+
 ```bash
+export CONDUIT_S2S_SECRET="$(openssl rand -hex 32)"
 docker build -t kaseya-quote-manager-mcp .
-docker run --rm -p 8080:8080 \
-  -e MCP_TRANSPORT=http \
-  -e KASEYA_QUOTE_MANAGER_API_KEY=your-api-key \
+docker run --rm \
+  -e CONDUIT_S2S_SECRET \
+  -p 127.0.0.1:8080:8080 \
   kaseya-quote-manager-mcp
 # Health: curl localhost:8080/health
 ```
 
-In the WYRE MCP Gateway the image runs with `AUTH_MODE=gateway`; the gateway injects the
-key as the `x-kaseya-quote-manager-api-key` header per request.
+Compose refuses to start when `CONDUIT_S2S_SECRET` is unset, sets `AUTH_MODE=gateway`,
+does not pass `KASEYA_QUOTE_MANAGER_API_KEY`, and publishes `127.0.0.1:8080:8080`.
+A project `.env` is interpolation only — the gateway service has no `env_file`.
+
+```bash
+# Reuses the CONDUIT_S2S_SECRET exported above.
+docker compose up
+```
+
+Single-tenant HTTP (`AUTH_MODE=env`) still requires the S2S secret, then uses
+`KASEYA_QUOTE_MANAGER_API_KEY`:
+
+```bash
+docker run --rm \
+  -e CONDUIT_S2S_SECRET \
+  -e AUTH_MODE=env \
+  -e KASEYA_QUOTE_MANAGER_API_KEY=your-api-key \
+  -e MCP_HTTP_HOST=0.0.0.0 \
+  -p 127.0.0.1:8080:8080 \
+  kaseya-quote-manager-mcp
+```
+
+Local HTTP without a secret is development-only. It always binds `127.0.0.1` and logs a
+warning. A non-loopback `MCP_HTTP_HOST` is overridden:
+
+```bash
+MCP_TRANSPORT=http MCP_ALLOW_INSECURE_DEV=1 npm run start:http
+```
+
+Sign a gateway request with `X-Gateway-S2S` and the API key header. Build the header
+first: `v1` is HMAC-SHA256 of the exact ASCII string `t=<unix seconds>` (no trailing
+newline), keyed with `CONDUIT_S2S_SECRET`, as 64 lowercase hex characters. Use the same
+exported `CONDUIT_S2S_SECRET` the server was started with.
+
+> `openssl dgst -hmac` takes the key as a process argument, so other local users can see it
+> in the process list while it runs. Only run this example on a trusted single-user machine;
+> elsewhere, sign requests from code that reads the secret from the environment.
+
+```bash
+: "${CONDUIT_S2S_SECRET:?Set CONDUIT_S2S_SECRET to the server secret}"
+: "${KASEYA_QUOTE_MANAGER_API_KEY:?Set KASEYA_QUOTE_MANAGER_API_KEY to the Quote Manager API key}"
+timestamp="$(date +%s)"
+digest="$(
+  printf 't=%s' "$timestamp" |
+    openssl dgst -sha256 -hmac "$CONDUIT_S2S_SECRET" |
+    awk '{print $NF}' |
+    tr '[:upper:]' '[:lower:]'
+)"
+X_GATEWAY_S2S="t=${timestamp},v1=${digest}"
+
+curl -sS http://127.0.0.1:8080/mcp \
+  -H 'content-type: application/json' \
+  -H 'accept: application/json, text/event-stream' \
+  -H "x-gateway-s2s: ${X_GATEWAY_S2S}" \
+  -H "x-kaseya-quote-manager-api-key: ${KASEYA_QUOTE_MANAGER_API_KEY}" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"kqm_status","arguments":{}}}'
+```
 
 ## Development
 
