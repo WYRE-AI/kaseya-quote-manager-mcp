@@ -82,13 +82,18 @@ export class Run {
   private readonly deadlineMs: number;
   private readonly clientSignal?: AbortSignal;
   private readonly signal: AbortSignal;
+  private readonly deadline: AbortController;
   private readonly limiter?: { acquire(signal?: AbortSignal): Promise<void> };
 
   constructor(opts: RunOptions) {
     this.budget = new CallBudget(opts.maxCalls);
     this.deadlineMs = opts.deadlineMs ?? REPORT_DEADLINE_MS;
     this.clientSignal = opts.signal;
-    this.signal = anySignal([...(opts.signal ? [opts.signal] : []), AbortSignal.timeout(this.deadlineMs)]);
+    // A plain timer, held by this run: AbortSignal.timeout inside AbortSignal.any can fire late or be collected.
+    this.deadline = new AbortController();
+    const timer = setTimeout(() => this.deadline.abort(new RunAborted('deadline')), this.deadlineMs);
+    timer.unref?.();
+    this.signal = anySignal([...(opts.signal ? [opts.signal] : []), this.deadline.signal]);
     if (opts.limiter) {
       this.limiter = opts.limiter;
     } else {
