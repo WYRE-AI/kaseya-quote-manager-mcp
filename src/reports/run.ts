@@ -39,7 +39,7 @@ export const isPositiveId = (v: unknown): v is number => typeof v === 'number' &
 
 const RATE_LIMIT_REASON = 'Stopped early because Quote Manager is rate limiting requests (HTTP 429), so these figures cover only the records read before that. Wait a minute and try again, or narrow the request with modifiedAfter.';
 const RECORD_LIMIT_REASON = 'Stopped at the record limit (maxQuotes, maxOrders, maxLines or maxPurchaseOrders), so more records may exist. Narrow the request with modifiedAfter or raise that limit.';
-const CANCELLED_REASON = 'Cancelled before it finished, so these figures cover only the records read so far.';
+const CANCELLED_REASON = 'Cancelled before it finished, so these figures cover only the records read so far. Run it again for complete figures.';
 const PRIORITY: Record<StopReason, number> = { complete: 0, maxItems: 1, budget: 2, rateLimit: 3, deadline: 4, cancelled: 5 };
 
 /** Overall time limit for one report run. */

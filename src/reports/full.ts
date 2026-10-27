@@ -4,7 +4,7 @@ import { okResult, errorResult } from '../render.js';
 import { requireId } from '../validate.js';
 import type { ExtraTool } from '../domains/entity.js';
 import { RunAborted } from './budget.js';
-import { Run, type RunContext, isPositiveId, maxCallsProp } from './run.js';
+import { REPORT_DEADLINE_MS, Run, type RunContext, isPositiveId, maxCallsProp } from './run.js';
 
 const fullTool = (name: string, what: string, idLabel: string) =>
   readOnlyTool(
@@ -21,7 +21,7 @@ interface Built {
 }
 
 const STOPPED_BEFORE_RECORD: Record<'deadline' | 'cancelled', string> = {
-  deadline: 'Stopped at the time limit before the record was read. Try again, or use the get tool.',
+  deadline: `Stopped at the ${REPORT_DEADLINE_MS / 1000}-second time limit before the record was read. Try again, or use the matching get tool, such as kqm_quote_get.`,
   cancelled: 'Cancelled before the record was read.',
 };
 

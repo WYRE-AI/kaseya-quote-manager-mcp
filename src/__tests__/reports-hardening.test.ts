@@ -190,7 +190,7 @@ describe('deadline and cancellation', () => {
     expect(Date.now() - started).toBeLessThan(300);
     expect(unwrap(res)).toMatchObject({
       partial: true,
-      partialReason: 'Cancelled before it finished, so these figures cover only the records read so far.',
+      partialReason: 'Cancelled before it finished, so these figures cover only the records read so far. Run it again for complete figures.',
     });
     expect(client.quotes.list).toHaveBeenCalledTimes(1);
   });
@@ -230,7 +230,7 @@ describe('deadline and cancellation', () => {
     client.quotes.get.mockImplementation(() => slow({ id: 1 }));
     const early = await quoteFullTool.run({ id: 1 }, { deadlineMs: 30 });
     expect(early.isError).toBe(true);
-    expect(early.content[0].text).toBe('Stopped at the time limit before the record was read. Try again, or use the get tool.');
+    expect(early.content[0].text).toBe('Stopped at the 75-second time limit before the record was read. Try again, or use the matching get tool, such as kqm_quote_get.');
 
     client.salesOrders.get.mockResolvedValue({ id: 2 });
     client.salesOrderLines.list.mockImplementation(() => slow([]));

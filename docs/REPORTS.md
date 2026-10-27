@@ -28,7 +28,7 @@ only call `list` and `get` on the Quote Manager API.
   unread. The result is `partial: true` with
   `Stopped at the 75-second time limit, so these figures cover only the records read so far. Narrow the request with modifiedAfter or a smaller limit.`
   or
-  `Cancelled before it finished, so these figures cover only the records read so far.`
+  `Cancelled before it finished, so these figures cover only the records read so far. Run it again for complete figures.`
   When more than one reason applies, the most serious wins: cancelled, then time limit, then
   rate limit, then maxCalls, then the record limit. A `*_get_full` tool that is stopped before
   it has read the main record returns an error instead.
