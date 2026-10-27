@@ -1,8 +1,7 @@
 import type { SalesOrderModel } from '@wyre-technology/node-kaseya-quote-manager';
 import { getClient } from '../utils/client.js';
 import { intProp, MODIFIED_AFTER, readOnlyTool } from '../domains/schema.js';
-import { Run, intArg, isPositiveId, maxCallsProp, num, round1, round2, strArg } from './run.js';
-import { DEFAULT_MAX_CALLS } from './budget.js';
+import { Run, type RunContext, intArg, isPositiveId, maxCallsProp, num, round1, round2, strArg } from './run.js';
 
 export const marginTool = readOnlyTool(
   'kqm_sales_order_margin_report',
@@ -14,11 +13,11 @@ export const marginTool = readOnlyTool(
   },
 );
 
-export async function runSalesOrderMargin(args: Record<string, unknown>) {
+export async function runSalesOrderMargin(args: Record<string, unknown>, ctx: RunContext = {}) {
   const maxOrders = intArg(args, 'maxOrders', 50);
   const modifiedAfter = strArg(args, 'modifiedAfter');
-  const run = new Run(intArg(args, 'maxCalls', DEFAULT_MAX_CALLS));
-  const client = getClient({ maxRetries: 1 });
+  const run = Run.start(args, ctx);
+  const client = getClient({ maxRetries: 0 });
 
   const orders = (await run.list<SalesOrderModel>((page) => client.salesOrders.list({ modifiedAfter, page, pageSize: 100 }), maxOrders)).items;
 
@@ -57,6 +56,7 @@ export async function runSalesOrderMargin(args: Record<string, unknown>) {
   }
 
   return {
+    ...run.envelope(),
     orders: rows,
     totals: {
       revenue: round2(totals.revenue),
@@ -70,6 +70,5 @@ export async function runSalesOrderMargin(args: Record<string, unknown>) {
     ordersPriced: rows.length,
     method:
       'Revenue = sum of line price x quantity; cost = sum of line cost x quantity; margin = revenue - cost. All figures are before tax and discounts and exclude delivery. Lines with no cost still count toward revenue, add 0 cost and are counted in linesMissingCost, so margin is overstated when linesMissingCost > 0. Sales orders whose lines could not be read before the call budget ran out or Quote Manager rate limited requests are left out (see ordersPriced).',
-    ...run.envelope(),
   };
 }

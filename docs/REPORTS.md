@@ -5,10 +5,14 @@ only call `list` and `get` on the Quote Manager API.
 
 ## Shared behavior
 
-- **Call budget.** Every report takes `maxCalls` (integer, 1–500, default 60). Each Quote
-  Manager request counts as one call. When the budget is spent the report stops, computes
+- **Call budget.** Every report takes `maxCalls` (integer, 1–120, default 60). Each Quote
+  Manager request counts as one call, and reports never retry (`maxRetries: 0`), so one call
+  is exactly one HTTP attempt. When the budget is spent the report stops, computes
   from what it has, and returns `partial: true` with
   `Stopped at maxCalls (N API calls), so these figures cover only the records read so far. Narrow the request with modifiedAfter or a smaller limit, or raise maxCalls.`
+- **Dates.** `modifiedAfter` is strict ISO 8601: `YYYY-MM-DD` or
+  `YYYY-MM-DDTHH:MM[:SS[.fff]]` with an optional `Z` or `±HH:MM`. Impossible dates such as
+  `2026-02-30` are refused.
 - **Record limits.** Each report has a cap on the records it scans (`maxQuotes`,
   `maxOrders`, `maxLines`, `maxPurchaseOrders`). If the cap is reached while more records
   may exist (the last page was full, or the page held more than the cap) the result is
@@ -18,12 +22,24 @@ only call `list` and `get` on the Quote Manager API.
   returns `partial: true` with
   `Stopped early because Quote Manager is rate limiting requests (HTTP 429), so these figures cover only the records read before that. Wait a minute and try again, or narrow the request with modifiedAfter.`
   Any other upstream error fails the call with the usual fixed error message.
-- **Requests.** Sequential, one client per run (so the SDK's 60-a-minute limiter applies
-  across the whole run), one retry at most. Lists are read as 1-based pages of 100; a page
-  with fewer than 100 rows ends the list.
-- **Output.** Every report returns `partial`, `partialReason` (when partial), `callsUsed`,
-  `method` (how it was calculated and what is inferred), `generatedAt`, and counts of what
-  was scanned. Money is rounded to 2 decimals at the end; sums keep full precision. A missing
+- **Time limit and cancel.** A run stops at 75 seconds overall. It also stops when the client
+  cancels the request, and does not start another request after that. The SDK cannot cancel a
+  request in flight, so the run returns at once and a request already running is left to finish
+  unread. The result is `partial: true` with
+  `Stopped at the 75-second time limit, so these figures cover only the records read so far. Narrow the request with modifiedAfter or a smaller limit.`
+  or
+  `Cancelled before it finished, so these figures cover only the records read so far.`
+  When more than one reason applies, the most serious wins: cancelled, then time limit, then
+  rate limit, then maxCalls, then the record limit. A `*_get_full` tool that is stopped before
+  it has read the main record returns an error instead.
+- **Requests.** Sequential, never retried. Every request first takes a slot from a limiter
+  shared by all calls with the same API key (60 a minute, sliding window, keyed by a hash of
+  the key), so concurrent runs and plain list/get tools cannot exceed it together. Waiting for
+  a slot counts against the time limit. Lists are read as 1-based pages of 100; a page with
+  fewer than 100 rows ends the list.
+- **Output.** Every report returns `partial`, `partialReason` (when partial), `callsUsed` and
+  `generatedAt` first, so they survive the 100 KB cut, then its data, counts of what was
+  scanned, and `method` (how it was calculated and what is inferred). Money is rounded to 2 decimals at the end; sums keep full precision. A missing
   number counts as 0 and, where it matters, is counted separately.
 - **Daily allowance.** Quote Manager allows 10,000 calls a day per key, shared with every
   other integration. Plan accordingly.
@@ -37,8 +53,10 @@ only call `list` and `get` on the Quote Manager API.
 
 **Calls:** `ceil(quotes / 100)` quote pages + 1 section list per quote + 1 line list per
 section that counts (sections that are multi-choice and not selected are not read) +, with
-`includeCost`, 1 supplier list per distinct product. Pages beyond the first 100 rows of a
-list add a call each.
+`includeCost`, 1 supplier list per distinct product, plus one more call per further 100
+supplier links. Pages beyond the first 100 rows of a list add a call each. If the supplier
+list for a product is cut short (maxCalls, rate limit, time limit or cancel), its cost is not
+used or cached, the quote is left unpriced, and the result is partial.
 
 **Calculation:**
 - Quote total = Σ line `price` × `quantity`, over lines that count.
@@ -153,7 +171,10 @@ stops early (record limit, budget, or rate limit) the result is partial and carr
 (order, lines, payments) and `kqm_purchase_order_get_full` (order, lines, costs) take `id` and
 `maxCalls` (default 60). Calls: 1 for the record, plus every page of each child list (quotes:
 1 section list + 1 line list per section). Same partial semantics; `partial`, `partialReason`,
-`callsUsed` and `generatedAt` are included.
+`callsUsed` and `generatedAt` come first. `complete` then says which child lists were read to
+their end: `{ sections, lines }` for a quote (and `linesComplete` on each section),
+`{ lines, payments }` for a sales order, `{ lines, costs }` for a purchase order. A flag is
+`true` only when that pagination finished.
 
 ## Inferred values
 

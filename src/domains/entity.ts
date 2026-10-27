@@ -1,6 +1,8 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import type { DomainHandler, CallToolResult } from '../utils/types.js';
+import { requestContext, type DomainHandler, type CallToolResult } from '../utils/types.js';
 import { getClient } from '../utils/client.js';
+import { acquireForCurrentKey } from '../utils/rate-limit.js';
+import type { RunContext } from '../reports/run.js';
 import { logger } from '../utils/logger.js';
 import { okResult, errorResult } from '../render.js';
 import { UNKNOWN_TOOL_MESSAGE } from '../errors.js';
@@ -26,7 +28,7 @@ export interface Entity {
 /** A hand-written tool that runs next to the entity tools in one domain. */
 export interface ExtraTool {
   tool: Tool;
-  run(args: Record<string, unknown>): Promise<CallToolResult>;
+  run(args: Record<string, unknown>, ctx?: RunContext): Promise<CallToolResult>;
 }
 
 /** Copy only the named, defined args. Callers have already validated them against the schema. */
@@ -53,9 +55,10 @@ export function createEntityHandler(entities: Entity[], extras: ExtraTool[] = []
     ...extras.map((x) => x.tool),
   ];
 
-  async function handleCall(toolName: string, args: Record<string, unknown>): Promise<CallToolResult> {
+  async function handleCall(toolName: string, args: Record<string, unknown>, mcpExtra?: unknown): Promise<CallToolResult> {
+    const ctx = requestContext(mcpExtra);
     const extra = extras.find((x) => x.tool.name === toolName);
-    if (extra) return extra.run(args);
+    if (extra) return extra.run(args, ctx);
     const match = /^kqm_(.+)_(list|get)$/.exec(toolName);
     const entity = match ? entities.find((e) => e.key === match[1]) : undefined;
     if (!match || !entity || (match[2] === 'get' && entity.noGet)) return errorResult(UNKNOWN_TOOL_MESSAGE);
@@ -66,6 +69,7 @@ export function createEntityHandler(entities: Entity[], extras: ExtraTool[] = []
       entity.resource
     ];
     logger.info(`API call: ${entity.resource}.${match[2]}`);
+    await acquireForCurrentKey(ctx.signal);
     if (match[2] === 'get') return okResult(await resource.get(requireId(args.id)));
     if (entity.noParams) return okResult(await resource.list());
     return okResult(await resource.list(pick(args, [...Object.keys(entity.filters ?? {}), 'page', 'pageSize'])));

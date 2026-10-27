@@ -1,8 +1,7 @@
 import type { QuoteModel } from '@wyre-technology/node-kaseya-quote-manager';
 import { getClient } from '../utils/client.js';
 import { intProp, MODIFIED_AFTER, readOnlyTool } from '../domains/schema.js';
-import { Run, boolArg, intArg, isPositiveId, maxCallsProp, num, round2, strArg } from './run.js';
-import { DEFAULT_MAX_CALLS } from './budget.js';
+import { Run, type RunContext, boolArg, intArg, isPositiveId, maxCallsProp, num, round2, strArg } from './run.js';
 
 export const pipelineTool = readOnlyTool(
   'kqm_pipeline_summary',
@@ -10,19 +9,19 @@ export const pipelineTool = readOnlyTool(
   {
     modifiedAfter: MODIFIED_AFTER,
     maxQuotes: intProp('Maximum quotes to scan (default 50)', 1, 200, 50),
-    includeCost: { type: 'boolean', default: false, description: 'Estimate cost from the lowest supplier cost per product (one extra request per distinct product)' },
+    includeCost: { type: 'boolean', default: false, description: 'Estimate cost from the lowest supplier cost per product (at least one extra request per distinct product)' },
     maxCalls: maxCallsProp,
   },
 );
 
 interface Bucket { count: number; total: number; cost: number }
 
-export async function runPipelineSummary(args: Record<string, unknown>) {
+export async function runPipelineSummary(args: Record<string, unknown>, ctx: RunContext = {}) {
   const maxQuotes = intArg(args, 'maxQuotes', 50);
   const includeCost = boolArg(args, 'includeCost', false);
   const modifiedAfter = strArg(args, 'modifiedAfter');
-  const run = new Run(intArg(args, 'maxCalls', DEFAULT_MAX_CALLS));
-  const client = getClient({ maxRetries: 1 });
+  const run = Run.start(args, ctx);
+  const client = getClient({ maxRetries: 0 });
 
   const quotes = (await run.list<QuoteModel>((page) => client.quotes.list({ modifiedAfter, page, pageSize: 100 }), maxQuotes)).items;
 
@@ -30,9 +29,10 @@ export async function runPipelineSummary(args: Record<string, unknown>) {
   /** Lowest supplier cost for a product, null when none, undefined when the run stopped first. */
   const unitCost = async (productID: number): Promise<number | null | undefined> => {
     if (supplierCost.has(productID)) return supplierCost.get(productID);
-    const links = await run.one(() => client.productSuppliers.list({ productID, pageSize: 100 }));
-    if (!links) return undefined;
-    const costs = links.map((l) => l.cost).filter((c): c is number => typeof c === 'number' && Number.isFinite(c));
+    const suppliers = await run.list((page) => client.productSuppliers.list({ productID, page, pageSize: 100 }));
+    // A partial read may have missed the cheapest supplier: no answer, and nothing cached.
+    if (suppliers.partial) return undefined;
+    const costs = suppliers.items.map((l) => l.cost).filter((c): c is number => typeof c === 'number' && Number.isFinite(c));
     const lowest = costs.length ? Math.min(...costs) : null;
     supplierCost.set(productID, lowest);
     return lowest;
@@ -96,6 +96,7 @@ export async function runPipelineSummary(args: Record<string, unknown>) {
   };
 
   return {
+    ...run.envelope(),
     byStatus: rows,
     totals,
     quotesScanned: quotes.length,
@@ -106,6 +107,5 @@ export async function runPipelineSummary(args: Record<string, unknown>) {
         ? 'Cost is INFERRED: quote lines carry no cost, so each line uses the lowest supplier cost for its product; lines without a product or supplier cost are counted in linesWithoutCost and add no cost, so margin is overstated. '
         : '') +
       'Quotes whose lines could not be read before the call budget ran out or Quote Manager rate limited requests are counted but not priced.',
-    ...run.envelope(),
   };
 }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotFoundError, RateLimitError, ServerError } from '@wyre-technology/node-kaseya-quote-manager';
 
-vi.mock('../utils/client.js', () => ({ getClient: vi.fn() }));
+vi.mock('../utils/client.js', () => ({ getClient: vi.fn(), getCredentials: vi.fn(() => ({ apiKey: 'k' })) }));
 
 import { getClient } from '../utils/client.js';
 import { reportsHandler } from '../domains/reports.js';
@@ -109,7 +109,7 @@ describe('kqm_pipeline_summary', () => {
     // 1 quotes + 3 sections + 4 lines (sections 10, 12, 20, 30)
     expect(out.callsUsed).toBe(8);
     expect(getClient).toHaveBeenCalledTimes(1);
-    expect(getClient).toHaveBeenCalledWith({ maxRetries: 1 });
+    expect(getClient).toHaveBeenCalledWith({ maxRetries: 0 });
   });
 
   it('passes modifiedAfter through', async () => {
@@ -161,9 +161,8 @@ describe('kqm_pipeline_summary', () => {
   });
 
   it('reads quotes across pages of 100', async () => {
-    client.quotes.list.mockImplementation(async ({ page }: { page: number }) => rows(page === 1 ? 100 : 20, (i) => ({ id: page * 1000 + i, status: 1 })));
-    client.quoteSections.list.mockResolvedValue([]);
-    const out = await report('kqm_pipeline_summary', { maxQuotes: 200, maxCalls: 500 });
+    client.quotes.list.mockImplementation(async ({ page }: { page: number }) => rows(page === 1 ? 100 : 20, () => ({ status: 1 })));
+    const out = await report('kqm_pipeline_summary', { maxQuotes: 200, maxCalls: 120 });
     expect(out.quotesScanned).toBe(120);
     expect(out.partial).toBe(false);
     expect(client.quotes.list.mock.calls.map((c) => c[0].page)).toEqual([1, 2]);
@@ -526,7 +525,7 @@ describe('get_full tools', () => {
       partial: false,
       callsUsed: 4,
     });
-    expect(getClient).toHaveBeenCalledWith({ maxRetries: 1 });
+    expect(getClient).toHaveBeenCalledWith({ maxRetries: 0 });
   });
 
   it('kqm_quote_get_full is partial at maxCalls', async () => {

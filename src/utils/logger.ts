@@ -20,6 +20,15 @@ function log(level: LogLevel, message: string, context?: unknown): void {
   }
 }
 
+/** What is safe to log about a caught error: its type and a short message, never the object (it can carry request data). */
+export function safeError(error: unknown): { errorType: string; message: string } {
+  const err = error as { constructor?: { name?: string }; message?: unknown } | null | undefined;
+  return {
+    errorType: err?.constructor?.name ?? typeof error,
+    message: (typeof err?.message === 'string' ? err.message : '').slice(0, 200),
+  };
+}
+
 export const logger = {
   debug: (msg: string, ctx?: unknown) => log('debug', msg, ctx),
   info:  (msg: string, ctx?: unknown) => log('info',  msg, ctx),

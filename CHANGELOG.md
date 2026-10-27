@@ -12,9 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Six read-only report tools in a new `reports` domain: `kqm_pipeline_summary`,
   `kqm_quote_conversion_funnel`, `kqm_sales_order_margin_report`,
   `kqm_customer_spend_summary`, `kqm_product_velocity_report`, and
-  `kqm_purchase_vs_sales_reconciliation`. Each has a `maxCalls` budget (default 60, max 500),
+  `kqm_purchase_vs_sales_reconciliation`. Each has a `maxCalls` budget (default 60, max 120),
   returns `partial`/`partialReason`/`callsUsed`/`method`, and degrades to partial results on
-  rate limits. See `docs/REPORTS.md`.
+  rate limits, a 75-second time limit and client cancellation. See `docs/REPORTS.md`.
 - `kqm_quote_get_full`, `kqm_sales_order_get_full`, and `kqm_purchase_order_get_full`
   convenience tools.
 - Untrusted-content envelope around every successful tool result, a 100 KB response cap with a
@@ -30,6 +30,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tool errors are fixed, caller-safe messages. Upstream bodies, URLs, arguments and IDs are no
   longer returned or logged.
 - `.github/workflows/release.yml` is now `workflow_dispatch` only until the next publish is approved.
+- Reports and `*_get_full` tools make one HTTP attempt per call (`maxRetries: 0`), so
+  `maxCalls` is a true request budget. The `maxCalls` maximum is 120 (was 500 in the first
+  draft of the reports).
+- Reports and `*_get_full` tools stop at a 75-second deadline or when the client cancels, and
+  return a partial result with the reason (`*_get_full` returns an error if it stops before
+  the main record is read). The MCP request signal now reaches the report and entity handlers.
+- One sliding-window rate limiter per API key (60 a minute, keyed by a hash of the key, at most
+  1,000 keys) is shared by every report, `*_get_full` and list/get request.
+- `kqm_pipeline_summary` with `includeCost` reads every page of supplier links, and leaves a
+  quote unpriced (partial) if that read is cut short, instead of trusting the first 100 links.
+- `partial` and `partialReason` are the first fields of every report and `*_get_full` result so
+  they survive truncation. `*_get_full` results add `complete` flags per child list (and
+  `linesComplete` per quote section).
+- The 100 KB cap now covers the whole result text: defanging, the envelope and the truncation
+  note are counted before the data is cut.
+- `modifiedAfter` accepts strict ISO 8601 only (`YYYY-MM-DD`, or `YYYY-MM-DDTHH:MM[:SS[.fff]]`
+  with an optional `Z` or `±HH:MM`); impossible dates are refused. `page` is limited to 10,000.
 
 ### Security
 
@@ -38,6 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/mcp` rejects bodies over 256 KiB with 413 (after the S2S check) and caps chunked bodies in
   the transport. Tool input over 10,000 values is refused.
 - HTTP request failures return a fixed 500 and no longer log the error object.
+- `MCP_ALLOW_INSECURE_DEV` requires `NODE_ENV` to be exactly `development`; `Development` or a
+  padded value now refuses to start.
+- A bad `AUTH_MODE` is refused without echoing its value. Fatal startup errors log only the
+  error type and a message of at most 200 characters.
 
 ### Removed
 

@@ -2,8 +2,7 @@ import type { QuoteModel } from '@wyre-technology/node-kaseya-quote-manager';
 import { getClient } from '../utils/client.js';
 import { errorStatus } from '../errors.js';
 import { intProp, MODIFIED_AFTER, readOnlyTool } from '../domains/schema.js';
-import { Run, boolArg, intArg, isPositiveId, maxCallsProp, round1, round4, strArg } from './run.js';
-import { DEFAULT_MAX_CALLS } from './budget.js';
+import { Run, type RunContext, boolArg, intArg, isPositiveId, maxCallsProp, round1, round4, strArg } from './run.js';
 
 export const funnelTool = readOnlyTool(
   'kqm_quote_conversion_funnel',
@@ -18,12 +17,12 @@ export const funnelTool = readOnlyTool(
 
 const DAY_MS = 86_400_000;
 
-export async function runQuoteConversionFunnel(args: Record<string, unknown>) {
+export async function runQuoteConversionFunnel(args: Record<string, unknown>, ctx: RunContext = {}) {
   const maxQuotes = intArg(args, 'maxQuotes', 500);
   const useOrderDate = boolArg(args, 'useOrderDate', true);
   const modifiedAfter = strArg(args, 'modifiedAfter');
-  const run = new Run(intArg(args, 'maxCalls', DEFAULT_MAX_CALLS));
-  const client = getClient({ maxRetries: 1 });
+  const run = Run.start(args, ctx);
+  const client = getClient({ maxRetries: 0 });
   const now = Date.now();
 
   const quotes = (await run.list<QuoteModel>((page) => client.quotes.list({ modifiedAfter, page, pageSize: 100 }), maxQuotes)).items;
@@ -70,6 +69,7 @@ export async function runQuoteConversionFunnel(args: Record<string, unknown>) {
 
   const decided = converted + expiredUnconverted;
   return {
+    ...run.envelope(),
     byStatus: [...statusCounts.entries()]
       .sort(([a], [b]) => (a ?? Number.POSITIVE_INFINITY) - (b ?? Number.POSITIVE_INFINITY))
       .map(([status, count]) => ({ status, count })),
@@ -82,6 +82,5 @@ export async function runQuoteConversionFunnel(args: Record<string, unknown>) {
     closeDateSource,
     method:
       'Converted = the quote has a linked sales order. Expired unconverted = no linked sales order and expiryDate is in the past. conversionRate = converted / quotesScanned. winRate = converted / (converted + expiredUnconverted) and is INFERRED: Quote Manager status codes are not documented, so wins are linked sales orders and losses are expired, unconverted quotes. Days to close = close date minus quote createdDate, averaged over converted quotes; the close date is the linked sales order orderDate when fetched, otherwise the quote modifiedDate (inferred). Status is the raw numeric code.',
-    ...run.envelope(),
   };
 }

@@ -15,7 +15,8 @@ export const intProp = (description: string, minimum: number, maximum: number, d
   description,
 });
 
-export const PAGE: Prop = { type: 'integer', minimum: 1, description: 'Page number (1-based)' };
+export const MAX_PAGE = 10000;
+export const PAGE: Prop = { type: 'integer', minimum: 1, maximum: MAX_PAGE, description: 'Page number (1-based)' };
 export const PAGE_SIZE: Prop = { type: 'integer', minimum: 1, maximum: 100, description: 'Results per page (max 100)' };
 export const MODIFIED_AFTER: Prop = text('ISO 8601 timestamp; return only records modified after this time', 64);
 

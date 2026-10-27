@@ -1,8 +1,7 @@
 import type { SalesOrderLineModel, SalesOrderModel } from '@wyre-technology/node-kaseya-quote-manager';
 import { getClient } from '../utils/client.js';
 import { intProp, MODIFIED_AFTER, readOnlyTool } from '../domains/schema.js';
-import { Run, boolArg, intArg, isPositiveId, maxCallsProp, num, round2, strArg } from './run.js';
-import { DEFAULT_MAX_CALLS } from './budget.js';
+import { Run, type RunContext, boolArg, intArg, isPositiveId, maxCallsProp, num, round2, strArg } from './run.js';
 
 export const velocityTool = readOnlyTool(
   'kqm_product_velocity_report',
@@ -21,13 +20,13 @@ const MAX_ORDERS_FOR_CUSTOMERS = 10_000;
 
 interface Velocity { title?: string; units: number; revenue: number; orders: Set<number>; customers: Set<number> }
 
-export async function runProductVelocity(args: Record<string, unknown>) {
+export async function runProductVelocity(args: Record<string, unknown>, ctx: RunContext = {}) {
   const maxLines = intArg(args, 'maxLines', 2000);
   const top = intArg(args, 'top', 25);
   const includeCustomers = boolArg(args, 'includeCustomers', true);
   const modifiedAfter = strArg(args, 'modifiedAfter');
-  const run = new Run(intArg(args, 'maxCalls', DEFAULT_MAX_CALLS));
-  const client = getClient({ maxRetries: 1 });
+  const run = Run.start(args, ctx);
+  const client = getClient({ maxRetries: 0 });
 
   // Lines first, so the order -> customer map only uses the budget that is left.
   const lines = (await run.list<SalesOrderLineModel>((page) => client.salesOrderLines.list({ modifiedAfter, page, pageSize: 100 }), maxLines)).items;
@@ -68,6 +67,7 @@ export async function runProductVelocity(args: Record<string, unknown>) {
     }));
 
   return {
+    ...run.envelope(),
     products: ranked,
     productsFound: products.size,
     linesScanned: lines.length,
@@ -75,6 +75,5 @@ export async function runProductVelocity(args: Record<string, unknown>) {
     linesWithoutCustomer: includeCustomers ? linesWithoutCustomer : null,
     method:
       'Units = sum of line quantity; revenue = sum of line price x quantity, before tax and discounts. Orders and customers are distinct counts. Customers come from the order of each line. Sales orders are read after the lines, with the calls left over, so lines whose order was not read (counted in linesWithoutCustomer) add no customer. Products are ranked by units, then revenue; the title is the first one seen.',
-    ...run.envelope(),
   };
 }

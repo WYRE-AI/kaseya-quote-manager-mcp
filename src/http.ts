@@ -2,7 +2,7 @@ import { createServer as createHttpServer, type IncomingMessage, type Server as 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createServer } from './server.js';
 import { runWithCredentials, setGatewayMode } from './utils/client.js';
-import { logger } from './utils/logger.js';
+import { logger, safeError } from './utils/logger.js';
 import { MAX_REQUEST_BODY_BYTES } from './input-limits.js';
 import { verifyS2sHeader, S2S_HEADER } from './s2s-verify.js';
 
@@ -92,7 +92,7 @@ function resolveS2sSecret(): string {
     devFlag !== '' &&
     devFlag !== '0' &&
     devFlag !== 'false' &&
-    (process.env.NODE_ENV ?? '').trim().toLowerCase() !== 'development'
+    process.env.NODE_ENV !== 'development'
   ) {
     refuseStart(INSECURE_DEV_NODE_ENV_ERROR);
   }
@@ -116,11 +116,10 @@ function resolveS2sSecret(): string {
 
 /** AUTH_MODE for HTTP: unset or empty is gateway; anything but gateway|env refuses to start. */
 export function resolveAuthMode(): 'gateway' | 'env' {
-  const raw = process.env.AUTH_MODE ?? '';
-  const mode = raw.trim();
+  const mode = (process.env.AUTH_MODE ?? '').trim();
   if (mode === '') return 'gateway';
   if (mode === 'gateway' || mode === 'env') return mode;
-  refuseStart(`AUTH_MODE must be 'gateway' or 'env'. Got ${JSON.stringify(raw.slice(0, 40))}.`);
+  refuseStart('Refusing to start: AUTH_MODE must be "gateway" or "env".');
 }
 
 /**
@@ -265,13 +264,18 @@ export async function startHttpServer(): Promise<HttpServer> {
   return httpServer;
 }
 
+/** Log a startup failure as type and a short message only, never the error object. */
+export function logFatalStartup(error: unknown): void {
+  logger.error('Fatal startup error', safeError(error));
+}
+
 // Entry point — check transport mode. Vitest imports this module to call
 // startHttpServer; skip the CLI entrypoint there. `node dist/http.js` still
 // starts HTTP or falls through to stdio.
 if (process.env.VITEST !== 'true') {
   if (process.env.MCP_TRANSPORT === 'http') {
     startHttpServer().catch((error) => {
-      logger.error('Fatal startup error', error);
+      logFatalStartup(error);
       process.exit(1);
     });
   } else {

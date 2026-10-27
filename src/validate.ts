@@ -17,6 +17,23 @@ const isIdName = (name: string) => name === 'id' || /(ID|Id)$/.test(name);
 const MODIFIED_AFTER_ERROR =
   'Invalid modifiedAfter. Use an ISO 8601 date or timestamp, for example 2026-01-31T00:00:00Z.';
 
+const ISO_8601 = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{3})?)?(?:Z|([+-])(\d{2}):(\d{2}))?)?$/;
+
+/** Strict ISO 8601: YYYY-MM-DD or YYYY-MM-DDTHH:MM[:SS[.fff]] with optional Z or ±HH:MM. Impossible dates fail. */
+export function isIsoDateTime(value: string): boolean {
+  const m = ISO_8601.exec(value);
+  if (!m) return false;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  // Round trip through Date: 2026-02-30 would come back as March 2.
+  const d = new Date(0);
+  d.setUTCFullYear(year, month - 1, day);
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return false;
+  if (m[4] !== undefined && (Number(m[4]) > 23 || Number(m[5]) > 59)) return false;
+  if (m[6] !== undefined && Number(m[6]) > 59) return false;
+  if (m[7] !== undefined && (Number(m[8]) > 23 || Number(m[9]) > 59)) return false;
+  return true;
+}
+
 function checkValue(name: string, prop: PropSchema, value: unknown): void {
   const bad = (message: string): never => {
     throw new ToolArgumentError(message);
@@ -38,7 +55,7 @@ function checkValue(name: string, prop: PropSchema, value: unknown): void {
       bad(`Invalid ${name}. Use text up to ${prop.maxLength ?? 256} characters.`);
     }
     if (prop.enum && !prop.enum.includes(value)) bad(`Invalid ${name}. Use one of: ${prop.enum.join(', ')}.`);
-    if (name === 'modifiedAfter' && Number.isNaN(Date.parse(value as string))) bad(MODIFIED_AFTER_ERROR);
+    if (name === 'modifiedAfter' && !isIsoDateTime(value as string)) bad(MODIFIED_AFTER_ERROR);
   } else if (prop.type === 'boolean') {
     if (typeof value !== 'boolean') bad(`Invalid ${name}. Use true or false.`);
   } else {

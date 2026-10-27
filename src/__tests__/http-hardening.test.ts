@@ -7,7 +7,7 @@ import { createHmac } from 'node:crypto';
 import { request as httpRequest, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { INSECURE_DEV_NODE_ENV_ERROR, SHORT_S2S_SECRET_ERROR, resolveAuthMode, startHttpServer } from '../http.js';
+import { INSECURE_DEV_NODE_ENV_ERROR, SHORT_S2S_SECRET_ERROR, logFatalStartup, resolveAuthMode, startHttpServer } from '../http.js';
 import { setGatewayMode } from '../utils/client.js';
 import { MAX_REQUEST_BODY_BYTES } from '../input-limits.js';
 import { unwrap } from './helpers/unwrap.js';
@@ -103,8 +103,27 @@ describe('resolveAuthMode', () => {
     mockExit();
     try {
       expect(() => resolveAuthMode()).toThrow('process.exit:1');
-      expect(logs.text()).toContain("AUTH_MODE must be 'gateway' or 'env'. Got ");
-      expect(logs.text()).not.toContain('x'.repeat(41));
+      expect(logs.text()).toContain('Refusing to start: AUTH_MODE must be "gateway" or "env".');
+      // The configured value is never echoed.
+      expect(logs.text()).not.toContain(value);
+      expect(logs.text()).not.toContain('Got');
+    } finally {
+      logs.restore();
+    }
+  });
+});
+
+describe('fatal startup log', () => {
+  it('logs only the error type and a message capped at 200 characters', () => {
+    const logs = captureStderr();
+    try {
+      const error = Object.assign(new TypeError(`bad ${'y'.repeat(500)}`), { apiKey: 'leaky-key', config: { secret: 'leaky-secret' } });
+      logFatalStartup(error);
+      const text = logs.text();
+      expect(text).toContain('Fatal startup error {"errorType":"TypeError","message":"bad ');
+      expect(text).not.toContain('leaky');
+      expect(text).not.toContain('stack');
+      expect(text).not.toContain('y'.repeat(201));
     } finally {
       logs.restore();
     }
@@ -135,7 +154,7 @@ describe('startup rules', () => {
     mockExit();
     try {
       await expect(startHttpServer()).rejects.toThrow('process.exit:1');
-      expect(logs.text()).toContain("AUTH_MODE must be 'gateway' or 'env'");
+      expect(logs.text()).toContain('AUTH_MODE must be "gateway" or "env"');
     } finally {
       logs.restore();
     }
@@ -194,11 +213,11 @@ describe('startup rules', () => {
     }
   });
 
-  it('starts on loopback with MCP_ALLOW_INSECURE_DEV=1 and NODE_ENV=Development', async () => {
+  it('starts on loopback with MCP_ALLOW_INSECURE_DEV=1 and NODE_ENV=development', async () => {
     delete process.env.CONDUIT_S2S_SECRET;
     delete process.env.MCP_HTTP_HOST;
     process.env.MCP_ALLOW_INSECURE_DEV = '1';
-    process.env.NODE_ENV = ' Development ';
+    process.env.NODE_ENV = 'development';
     const logs = captureStderr();
     try {
       const server = await startHttpServer();
@@ -209,6 +228,23 @@ describe('startup rules', () => {
       logs.restore();
     }
   });
+
+  it.each([[' Development '], ['Development'], ['DEVELOPMENT'], ['development '], [' development'], ['development\n'], ['']])(
+    'refuses MCP_ALLOW_INSECURE_DEV=1 when NODE_ENV is %j (exact match only)',
+    async (nodeEnv) => {
+      delete process.env.CONDUIT_S2S_SECRET;
+      process.env.MCP_ALLOW_INSECURE_DEV = '1';
+      process.env.NODE_ENV = nodeEnv;
+      const logs = captureStderr();
+      mockExit();
+      try {
+        await expect(startHttpServer()).rejects.toThrow('process.exit:1');
+        expect(logs.text()).toContain('MCP_ALLOW_INSECURE_DEV requires NODE_ENV=development');
+      } finally {
+        logs.restore();
+      }
+    },
+  );
 });
 
 describe('request body cap', () => {

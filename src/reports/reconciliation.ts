@@ -1,8 +1,7 @@
 import type { PurchaseOrderModel } from '@wyre-technology/node-kaseya-quote-manager';
 import { getClient } from '../utils/client.js';
 import { idProp, intProp, MODIFIED_AFTER, readOnlyTool } from '../domains/schema.js';
-import { Run, intArg, isPositiveId, maxCallsProp, num, strArg } from './run.js';
-import { DEFAULT_MAX_CALLS } from './budget.js';
+import { Run, type RunContext, intArg, isPositiveId, maxCallsProp, num, strArg } from './run.js';
 import { requireId } from '../validate.js';
 
 export const reconciliationTool = readOnlyTool(
@@ -27,12 +26,12 @@ interface Row {
   purchaseOrderIDs: Set<number>;
 }
 
-export async function runPurchaseVsSales(args: Record<string, unknown>) {
+export async function runPurchaseVsSales(args: Record<string, unknown>, ctx: RunContext = {}) {
   const salesOrderID = requireId(args.salesOrderID, 'salesOrderID');
   const maxPurchaseOrders = intArg(args, 'maxPurchaseOrders', 500);
   const modifiedAfter = strArg(args, 'modifiedAfter');
-  const run = new Run(intArg(args, 'maxCalls', DEFAULT_MAX_CALLS));
-  const client = getClient({ maxRetries: 1 });
+  const run = Run.start(args, ctx);
+  const client = getClient({ maxRetries: 0 });
 
   const rows = new Map<number, Row>();
   const row = (productID: number, title?: string): Row => {
@@ -89,17 +88,17 @@ export async function runPurchaseVsSales(args: Record<string, unknown>) {
 
   const envelope = run.envelope();
   return {
+    ...envelope,
+    ...(envelope.partial
+      ? { warning: 'Not every record was read, so a purchase order may be missing and not_purchased or under_purchased may be wrong. Raise maxCalls or maxPurchaseOrders and run it again.' }
+      : {}),
     salesOrderID,
     products,
     unmatchedLines: { salesOrderLines: salesLinesWithoutProduct, purchaseOrderLines: purchaseLinesWithoutProduct },
     purchaseOrdersScanned: scan.items.length,
     purchaseOrdersMatched: matched.length,
     purchaseOrdersRead,
-    ...(envelope.partial
-      ? { warning: 'Not every record was read, so a purchase order may be missing and not_purchased or under_purchased may be wrong. Raise maxCalls or maxPurchaseOrders and run it again.' }
-      : {}),
     method:
       'Products are joined by productID. Sold = sum of sales order line quantity; purchased and received = sums of quantity and quantityReceived on the lines of purchase orders whose salesOrderID matches. Status: matched (purchased = sold), under_purchased, over_purchased, not_purchased (on the sales order, no purchase order line), not_on_sales_order (purchased but not sold). fullyReceived = received >= purchased, null when nothing was purchased. Lines without a productID cannot be joined and are only counted in unmatchedLines. Quote Manager cannot filter purchase orders by sales order, so purchase orders are scanned and filtered client-side.',
-    ...envelope,
   };
 }

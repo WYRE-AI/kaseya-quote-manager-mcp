@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../utils/client.js', () => ({ getClient: vi.fn() }));
+vi.mock('../utils/client.js', () => ({ getClient: vi.fn(), getCredentials: vi.fn(() => ({ apiKey: 'k' })) }));
 
 import { getClient } from '../utils/client.js';
 import { orgHandler } from '../domains/org.js';

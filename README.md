@@ -36,7 +36,7 @@ not start unless `CONDUIT_S2S_SECRET` is a real value of **at least 32 character
 (`openssl rand -hex 32`). Known placeholders (`changeme`, `change-me`, `secret`, `example`,
 `placeholder`, `replace-me`, `your-secret`, `your-s2s-secret`, `s2s-secret`,
 `replace-with-a-real-secret`) are rejected, including when `MCP_ALLOW_INSECURE_DEV=1` is
-set. `MCP_ALLOW_INSECURE_DEV` itself is refused unless `NODE_ENV=development`. The process
+set. `MCP_ALLOW_INSECURE_DEV` itself is refused unless `NODE_ENV` is exactly `development` (no spaces, no other case). The process
 never logs the secret.
 
 ### Auth mode (HTTP)
@@ -84,8 +84,10 @@ stdio transport does not use `CONDUIT_S2S_SECRET`.
 ## Tool call hardening
 
 - **Strict inputs.** Every tool schema has `additionalProperties: false`. IDs (`id`,
-  `quoteID`, `salesOrderID`, …) are integers of at least 1, `page` is at least 1, `pageSize`
-  is 1–100, and strings have a `maxLength`. A call is checked before it runs; an unknown
+  `quoteID`, `salesOrderID`, …) are integers of at least 1, `page` is 1–10,000, `pageSize`
+  is 1–100, and strings have a `maxLength`. `modifiedAfter` must be strict ISO 8601:
+  `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM[:SS[.fff]]` with an optional `Z` or `±HH:MM`; forms like
+  `March 5`, `2026/01/31` or `2026-02-30` are refused. A call is checked before it runs; an unknown
   argument, a missing required argument, or a bad value returns a fixed message that names
   the schema property and never echoes what you sent. Tool input with more than 10,000
   values is refused.
@@ -94,27 +96,34 @@ stdio transport does not use `CONDUIT_S2S_SECRET`.
   wrapped as `<untrusted-content nonce="…">…</untrusted-content nonce="…">` with a notice not
   to follow instructions inside it. Forged `untrusted-content` markers in the data are
   defanged; nothing else is changed (no HTML escaping).
-- **100 KB response cap.** Output over 100 KB is cut on a character boundary and ends with
+- **100 KB response cap.** The whole result text, envelope and truncation note included, is at
+  most 102,400 bytes. Output over that is cut on a character boundary and ends with
   `[TRUNCATED: the result was larger than 100 KB, so the rest was cut. Ask for less: a smaller pageSize, top or record limit, a later page, or narrower filters such as modifiedAfter. For a *_get_full tool, read the child records with their list tools instead.]`
   inside the envelope.
 - **Fixed error text.** Errors are short fixed sentences (for example "Quote Manager
   rejected the API key."). Upstream bodies, URLs and your arguments are never returned or
-  logged.
+  logged. Startup failures log only the error type and a message of at most 200 characters,
+  and a bad `AUTH_MODE` is refused without printing its value.
 
 ## Rate budget
 
 Quote Manager allows **60 requests a minute and 10,000 a day** per API key, shared with every
-other integration using that key. The server limits itself to 60 a minute. It does not
-count the daily total, so plan for it: a few report runs a day is fine, a loop is not.
+other integration using that key. The server limits itself to 60 a minute **per API key**
+across all concurrent requests (a sliding window shared by every tool call that uses the
+key; the key is only held as a hash). It does not count the daily total, so plan for it: a
+few report runs a day is fine, a loop is not.
 
-Report tools take `maxCalls` (1–500, default **60**). Every Quote Manager request a report
+Report tools take `maxCalls` (1–120, default **60**). Every Quote Manager request a report
 makes counts as one call, and the report stops and returns partial results when the budget
-is spent. Reports make sequential requests with a single client, so the per-minute limiter
-applies across the run, and use one retry at most so they fail fast. Roughly:
+is spent. Reports and `*_get_full` tools never retry (`maxRetries: 0`), so one call is exactly
+one HTTP attempt. They also stop at an overall **75-second time limit**, or as soon as the
+client cancels the request, and return `partial: true` with the reason. The Quote Manager SDK
+cannot cancel a request in flight, so a request that is already running is left to finish
+and its result is dropped. Roughly:
 
 | Report | Calls |
 |--------|-------|
-| `kqm_pipeline_summary` (50 quotes) | 1 + 50 + one per selected section (about 100–150), plus one per distinct product with `includeCost` |
+| `kqm_pipeline_summary` (50 quotes) | 1 + 50 + one per selected section (about 100–150), plus at least one per distinct product with `includeCost` (one per 100 supplier links) |
 | `kqm_quote_conversion_funnel` (500 quotes) | 5 pages, plus one per converted quote with `useOrderDate` |
 | `kqm_sales_order_margin_report` (50 orders) | 1 + 50 |
 | `kqm_customer_spend_summary` (100 orders) | 1 + 2 per order scanned for the customer (about 201) |
@@ -135,7 +144,7 @@ Copy [`.env.example`](.env.example).
 | `MCP_TRANSPORT` | No | `stdio` (default) or `http` |
 | `AUTH_MODE` | No | HTTP only. Unset or empty means `gateway`. Exactly `gateway` or `env`; any other value refuses to start. Gateway mode requires `X-Kaseya-Quote-Manager-Api-Key` on each `/mcp` request and never reads the environment variable. |
 | `CONDUIT_S2S_SECRET` | Yes for HTTP | Service-to-service secret, at least 32 characters. The HTTP server logs an error and exits non-zero when this is empty, shorter than 32 characters, or a known placeholder. Compose will not start without it. Never commit a real value. |
-| `MCP_ALLOW_INSECURE_DEV` | No | Set to exactly `1` only for local development, and only with `NODE_ENV=development` (any other `NODE_ENV` refuses to start), to start HTTP without `CONDUIT_S2S_SECRET`. The process logs a warning, does not enforce `X-Gateway-S2S`, and binds `127.0.0.1` only. A non-loopback `MCP_HTTP_HOST` is overridden and logged. A placeholder or short secret still refuses to start. |
+| `MCP_ALLOW_INSECURE_DEV` | No | Set to exactly `1` only for local development, and only with `NODE_ENV` exactly `development` (any other value, including `Development` or a padded value, refuses to start), to start HTTP without `CONDUIT_S2S_SECRET`. The process logs a warning, does not enforce `X-Gateway-S2S`, and binds `127.0.0.1` only. A non-loopback `MCP_HTTP_HOST` is overridden and logged. A placeholder or short secret still refuses to start. |
 | `MCP_HTTP_HOST` | No | Bind address when a secret is configured. Defaults to `127.0.0.1`. The container image sets `0.0.0.0`. Ignored in favor of `127.0.0.1` when the insecure-dev bypass is on. |
 | `MCP_HTTP_PORT` | No | HTTP port. Defaults to `8080`. |
 | `LOG_LEVEL` | No | `debug`, `info`, `warn`, or `error`. Defaults to `info`. |
@@ -149,7 +158,7 @@ Copy [`.env.example`](.env.example).
 - **Hardened tool calls** — strict input schemas, untrusted-content envelope, 100 KB response
   cap, fixed error messages. See [Tool call hardening](#tool-call-hardening).
 - **Decision-tree navigation** — call `kqm_navigate` to explore a domain's tools.
-- **Rate limiting** — respects the API's 60 req/min limit, with retry on 429/5xx, and
+- **Rate limiting** — respects the API's 60 req/min limit with one shared limiter per API key; plain list/get calls retry on 429/5xx, reports never retry, and
   call budgets on every report. See [Rate budget](#rate-budget).
 - **Dual transport** — stdio (local) and HTTP Streamable (gateway/Docker).
 - **MCPB packaging** for one-click Claude Desktop install.
@@ -179,9 +188,11 @@ Convenience tools that make several requests and return nested records (inputs: 
 
 ## Reports
 
-Read-only tools in the `reports` domain. Each takes `maxCalls` (default 60, max 500) and
-returns `partial`, `partialReason`, `callsUsed`, `method`, and `generatedAt` alongside its
-numbers. Money is rounded to 2 decimals; totals are before tax and discounts and exclude
+Read-only tools in the `reports` domain. Each takes `maxCalls` (default 60, max 120) and
+returns `partial`, `partialReason`, `callsUsed`, `generatedAt` and `method` alongside its
+numbers. `partial` and `partialReason` come first in the JSON so they survive truncation.
+The `*_get_full` tools also return `complete`, which says per child list (and, for quotes,
+per section as `linesComplete`) whether it was read to its end. Money is rounded to 2 decimals; totals are before tax and discounts and exclude
 delivery unless stated. Several figures are inferred from fields Quote Manager does not
 document, and each report's `method` says which. Full details: [docs/REPORTS.md](docs/REPORTS.md).
 
