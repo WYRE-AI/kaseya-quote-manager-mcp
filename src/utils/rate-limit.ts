@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
+import { RateLimitError } from '@wyre-ai/node-kaseya-quote-manager';
 import { getCredentials } from './client.js';
 
 export const RATE_LIMIT_REQUESTS = 60;
 export const RATE_LIMIT_WINDOW_MS = 60_000;
-const MAX_KEYS = 1000;
+const DEFAULT_MAX_KEYS = 1000;
 
 /** Rejected by `acquire` when its signal aborts while waiting for a slot. */
 export class LimiterAbortError extends Error {
@@ -15,6 +16,12 @@ export class LimiterAbortError extends Error {
 /** Sliding window: at most `limit` slots in any `windowMs`. */
 export class SlidingWindowLimiter {
   private readonly stamps: number[] = [];
+
+  /** True when no slot taken is still inside the window, so dropping this limiter loses nothing. */
+  isIdle(): boolean {
+    const t = this.now();
+    return !this.stamps.length || this.stamps[this.stamps.length - 1] <= t - this.windowMs;
+  }
 
   constructor(
     readonly limit = RATE_LIMIT_REQUESTS,
@@ -51,10 +58,11 @@ export class SlidingWindowLimiter {
   }
 }
 
-interface LimiterConfig { limit: number; windowMs: number }
-const DEFAULT_CONFIG: LimiterConfig = { limit: RATE_LIMIT_REQUESTS, windowMs: RATE_LIMIT_WINDOW_MS };
+interface LimiterConfig { limit: number; windowMs: number; maxKeys: number }
+const DEFAULT_CONFIG: LimiterConfig = { limit: RATE_LIMIT_REQUESTS, windowMs: RATE_LIMIT_WINDOW_MS, maxKeys: DEFAULT_MAX_KEYS };
 
-// One limiter per API key, keyed by a hash so the raw key is never stored. Least recently used keys are evicted.
+// One limiter per API key, keyed by a hash so the raw key is never stored.
+// At the cap, the least recently used idle key (no slot inside its window) is evicted; if every key is active, new keys are refused.
 const limiters = new Map<string, SlidingWindowLimiter>();
 let config = DEFAULT_CONFIG;
 
@@ -64,8 +72,19 @@ export function limiterFor(apiKey: string): SlidingWindowLimiter {
   if (limiter) {
     limiters.delete(id);
   } else {
+    if (limiters.size >= config.maxKeys) {
+      // Map order is least recently used first.
+      const idle = [...limiters].find(([, l]) => l.isIdle());
+      if (!idle) {
+        throw new RateLimitError(
+          'Too many API keys are active on this server right now, so this request was refused. Wait a minute and try again.',
+          Math.ceil(config.windowMs / 1000),
+          undefined,
+        );
+      }
+      limiters.delete(idle[0]);
+    }
     limiter = new SlidingWindowLimiter(config.limit, config.windowMs);
-    while (limiters.size >= MAX_KEYS) limiters.delete(limiters.keys().next().value as string);
   }
   limiters.set(id, limiter);
   return limiter;

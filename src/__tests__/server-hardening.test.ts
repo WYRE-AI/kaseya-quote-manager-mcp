@@ -6,7 +6,7 @@ import {
   ValidationError,
   RateLimitError,
   ServerError,
-} from '@wyre-technology/node-kaseya-quote-manager';
+} from '@wyre-ai/node-kaseya-quote-manager';
 
 vi.mock('../utils/client.js', () => ({ getClient: vi.fn(), getCredentials: vi.fn(() => ({ apiKey: 'k' })) }));
 

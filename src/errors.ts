@@ -5,7 +5,7 @@ import {
   ValidationError,
   RateLimitError,
   ServerError,
-} from '@wyre-technology/node-kaseya-quote-manager';
+} from '@wyre-ai/node-kaseya-quote-manager';
 
 /** Bad caller input. The message is fixed text that never echoes caller values. */
 export class ToolArgumentError extends Error {}

@@ -1,4 +1,4 @@
-import type { SalesOrderLineModel, SalesOrderModel } from '@wyre-technology/node-kaseya-quote-manager';
+import type { SalesOrderLineModel, SalesOrderModel } from '@wyre-ai/node-kaseya-quote-manager';
 import { getClient } from '../utils/client.js';
 import { intProp, MODIFIED_AFTER, readOnlyTool } from '../domains/schema.js';
 import { Run, type RunContext, boolArg, intArg, isPositiveId, maxCallsProp, num, round2, strArg } from './run.js';
@@ -21,11 +21,19 @@ const MAX_ORDERS_FOR_CUSTOMERS = 10_000;
 interface Velocity { title?: string; units: number; revenue: number; orders: Set<number>; customers: Set<number> }
 
 export async function runProductVelocity(args: Record<string, unknown>, ctx: RunContext = {}) {
+  const run = Run.start(args, ctx);
+  try {
+    return await productVelocity(run, args);
+  } finally {
+    run.close();
+  }
+}
+
+async function productVelocity(run: Run, args: Record<string, unknown>) {
   const maxLines = intArg(args, 'maxLines', 2000);
   const top = intArg(args, 'top', 25);
   const includeCustomers = boolArg(args, 'includeCustomers', true);
   const modifiedAfter = strArg(args, 'modifiedAfter');
-  const run = Run.start(args, ctx);
   const client = getClient({ maxRetries: 0 });
 
   // Lines first, so the order -> customer map only uses the budget that is left.

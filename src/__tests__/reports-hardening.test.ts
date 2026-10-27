@@ -4,7 +4,7 @@
  * test in retry-counting.test.ts uses the real client.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { RateLimitError } from '@wyre-technology/node-kaseya-quote-manager';
+import { RateLimitError } from '@wyre-ai/node-kaseya-quote-manager';
 
 vi.mock('../utils/client.js', () => ({ getClient: vi.fn(), getCredentials: vi.fn(() => ({ apiKey: 'k' })) }));
 

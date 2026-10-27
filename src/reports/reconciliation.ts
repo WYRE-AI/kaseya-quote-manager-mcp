@@ -1,4 +1,4 @@
-import type { PurchaseOrderModel } from '@wyre-technology/node-kaseya-quote-manager';
+import type { PurchaseOrderModel } from '@wyre-ai/node-kaseya-quote-manager';
 import { getClient } from '../utils/client.js';
 import { idProp, intProp, MODIFIED_AFTER, readOnlyTool } from '../domains/schema.js';
 import { Run, type RunContext, intArg, isPositiveId, maxCallsProp, num, strArg } from './run.js';
@@ -28,9 +28,17 @@ interface Row {
 
 export async function runPurchaseVsSales(args: Record<string, unknown>, ctx: RunContext = {}) {
   const salesOrderID = requireId(args.salesOrderID, 'salesOrderID');
+  const run = Run.start(args, ctx);
+  try {
+    return await purchaseVsSales(run, args, salesOrderID);
+  } finally {
+    run.close();
+  }
+}
+
+async function purchaseVsSales(run: Run, args: Record<string, unknown>, salesOrderID: number) {
   const maxPurchaseOrders = intArg(args, 'maxPurchaseOrders', 500);
   const modifiedAfter = strArg(args, 'modifiedAfter');
-  const run = Run.start(args, ctx);
   const client = getClient({ maxRetries: 0 });
 
   const rows = new Map<number, Row>();

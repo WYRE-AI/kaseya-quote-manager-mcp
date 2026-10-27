@@ -1,4 +1,4 @@
-import type { SalesOrderModel } from '@wyre-technology/node-kaseya-quote-manager';
+import type { SalesOrderModel } from '@wyre-ai/node-kaseya-quote-manager';
 import { getClient } from '../utils/client.js';
 import { idProp, intProp, MODIFIED_AFTER, readOnlyTool } from '../domains/schema.js';
 import { Run, type RunContext, intArg, isPositiveId, maxCallsProp, num, round2, strArg } from './run.js';
@@ -18,11 +18,19 @@ export const spendTool = readOnlyTool(
 interface Spend { orders: number; revenue: number; cost: number; payments: number; tax: number }
 
 export async function runCustomerSpend(args: Record<string, unknown>, ctx: RunContext = {}) {
+  const run = Run.start(args, ctx);
+  try {
+    return await customerSpend(run, args);
+  } finally {
+    run.close();
+  }
+}
+
+async function customerSpend(run: Run, args: Record<string, unknown>) {
   const maxOrders = intArg(args, 'maxOrders', 100);
   const top = intArg(args, 'top', 25);
   const customerID = typeof args.customerID === 'number' ? args.customerID : undefined;
   const modifiedAfter = strArg(args, 'modifiedAfter');
-  const run = Run.start(args, ctx);
   const client = getClient({ maxRetries: 0 });
 
   const scanned = (await run.list<SalesOrderModel>((page) => client.salesOrders.list({ modifiedAfter, page, pageSize: 100 }), maxOrders)).items;

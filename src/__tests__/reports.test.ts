@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { NotFoundError, RateLimitError, ServerError } from '@wyre-technology/node-kaseya-quote-manager';
+import { NotFoundError, RateLimitError, ServerError } from '@wyre-ai/node-kaseya-quote-manager';
 
 vi.mock('../utils/client.js', () => ({ getClient: vi.fn(), getCredentials: vi.fn(() => ({ apiKey: 'k' })) }));
 

@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { KaseyaQuoteManagerClient } from '@wyre-technology/node-kaseya-quote-manager';
+import { KaseyaQuoteManagerClient } from '@wyre-ai/node-kaseya-quote-manager';
 import { CredentialsError } from '../errors.js';
 
 export interface Credentials { apiKey: string; }

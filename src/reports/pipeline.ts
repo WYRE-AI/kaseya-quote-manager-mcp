@@ -1,4 +1,4 @@
-import type { QuoteModel } from '@wyre-technology/node-kaseya-quote-manager';
+import type { QuoteModel } from '@wyre-ai/node-kaseya-quote-manager';
 import { getClient } from '../utils/client.js';
 import { intProp, MODIFIED_AFTER, readOnlyTool } from '../domains/schema.js';
 import { Run, type RunContext, boolArg, intArg, isPositiveId, maxCallsProp, num, round2, strArg } from './run.js';
@@ -17,10 +17,18 @@ export const pipelineTool = readOnlyTool(
 interface Bucket { count: number; total: number; cost: number }
 
 export async function runPipelineSummary(args: Record<string, unknown>, ctx: RunContext = {}) {
+  const run = Run.start(args, ctx);
+  try {
+    return await pipelineSummary(run, args);
+  } finally {
+    run.close();
+  }
+}
+
+async function pipelineSummary(run: Run, args: Record<string, unknown>) {
   const maxQuotes = intArg(args, 'maxQuotes', 50);
   const includeCost = boolArg(args, 'includeCost', false);
   const modifiedAfter = strArg(args, 'modifiedAfter');
-  const run = Run.start(args, ctx);
   const client = getClient({ maxRetries: 0 });
 
   const quotes = (await run.list<QuoteModel>((page) => client.quotes.list({ modifiedAfter, page, pageSize: 100 }), maxQuotes)).items;

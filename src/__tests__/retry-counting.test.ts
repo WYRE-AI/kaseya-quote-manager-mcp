@@ -3,7 +3,7 @@
  * so a budget unit has to equal one HTTP attempt. The shared limiter is widened so the test is fast.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ServerError } from '@wyre-technology/node-kaseya-quote-manager';
+import { RateLimitError, ServerError } from '@wyre-ai/node-kaseya-quote-manager';
 import { reportsHandler } from '../domains/reports.js';
 import { salesHandler } from '../domains/sales.js';
 import { resetLimiters } from '../utils/rate-limit.js';
@@ -67,6 +67,24 @@ describe('retry counting (real SDK client, fake fetch)', () => {
     fetchMock.mockImplementationOnce(async () => json({ id: 1 })).mockImplementationOnce(async () => json({}, 500));
     await expect(salesHandler.handleCall('kqm_sales_order_get_full', { id: 1, maxCalls: 10 })).rejects.toBeInstanceOf(ServerError);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('plain entity list does not retry a 500: one request', async () => {
+    fetchMock.mockImplementation(async () => json({ error: 'boom' }, 500));
+    await expect(salesHandler.handleCall('kqm_quote_list', {})).rejects.toBeInstanceOf(ServerError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('plain entity list does not retry a 429: one request', async () => {
+    fetchMock.mockImplementation(async () => json({}, 429));
+    await expect(salesHandler.handleCall('kqm_quote_list', {})).rejects.toBeInstanceOf(RateLimitError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('plain entity get does not retry a 500: one request', async () => {
+    fetchMock.mockImplementation(async () => json({ error: 'boom' }, 500));
+    await expect(salesHandler.handleCall('kqm_quote_get', { id: 1 })).rejects.toBeInstanceOf(ServerError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('a 429 on a get_full child list keeps the partial result', async () => {

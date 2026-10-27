@@ -63,7 +63,8 @@ export function createEntityHandler(entities: Entity[], extras: ExtraTool[] = []
     const entity = match ? entities.find((e) => e.key === match[1]) : undefined;
     if (!match || !entity || (match[2] === 'get' && entity.noGet)) return errorResult(UNKNOWN_TOOL_MESSAGE);
 
-    const client = await getClient();
+    // One limiter slot = one HTTP attempt, so the SDK must not retry on its own.
+    const client = getClient({ maxRetries: 0 });
     // Resources share the same list/get shape, so one dynamic lookup serves every entity.
     const resource = (client as unknown as Record<string, { list(p?: unknown): Promise<unknown>; get(id: number): Promise<unknown> }>)[
       entity.resource

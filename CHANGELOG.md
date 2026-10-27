@@ -37,7 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   return a partial result with the reason (`*_get_full` returns an error if it stops before
   the main record is read). The MCP request signal now reaches the report and entity handlers.
 - One sliding-window rate limiter per API key (60 a minute, keyed by a hash of the key, at most
-  1,000 keys) is shared by every report, `*_get_full` and list/get request.
+  1,000 keys) is shared by every report, `*_get_full` and list/get request. At the cap only idle
+  keys are evicted (least recently used first); if every key is active a new key gets a rate-limit
+  error (reports return partial with the rate-limit reason).
+- Plain list/get tools no longer retry (`maxRetries: 0`), so one limiter slot is one HTTP attempt.
+- Each report run clears its deadline timer and abort listeners when it finishes (`Run.close()`),
+  including on errors.
+- Dependency moved to `@wyre-ai/node-kaseya-quote-manager` `^1.0.5` (same code as 1.0.0, new
+  scope); `.npmrc` and CI now configure only the `@wyre-ai` scope.
 - `kqm_pipeline_summary` with `includeCost` reads every page of supplier links, and leaves a
   quote unpriced (partial) if that read is cut short, instead of trusting the first 100 links.
 - `partial` and `partialReason` are the first fields of every report and `*_get_full` result so

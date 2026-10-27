@@ -56,18 +56,30 @@ export interface RunOptions extends RunContext {
   limiter?: { acquire(signal?: AbortSignal): Promise<void> };
 }
 
-/** Abort when any input aborts. AbortSignal.any needs Node 20.3; older 20.x gets a manual join. */
-function anySignal(signals: AbortSignal[]): AbortSignal {
-  if (typeof AbortSignal.any === 'function') return AbortSignal.any(signals);
+/**
+ * Abort when any input aborts. AbortSignal.any needs Node 20.3; older 20.x gets a manual join,
+ * whose listeners on the source signals are removed by `cleanup`.
+ */
+function anySignal(signals: AbortSignal[]): { signal: AbortSignal; cleanup: () => void } {
+  if (typeof AbortSignal.any === 'function') return { signal: AbortSignal.any(signals), cleanup: () => {} };
   const controller = new AbortController();
+  const attached: Array<[AbortSignal, () => void]> = [];
   for (const s of signals) {
     if (s.aborted) {
       controller.abort(s.reason);
       break;
     }
-    s.addEventListener('abort', () => controller.abort(s.reason), { once: true });
+    const onAbort = () => controller.abort(s.reason);
+    s.addEventListener('abort', onAbort, { once: true });
+    attached.push([s, onAbort]);
   }
-  return controller.signal;
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      for (const [s, onAbort] of attached) s.removeEventListener('abort', onAbort);
+      attached.length = 0;
+    },
+  };
 }
 
 /**
@@ -84,22 +96,49 @@ export class Run {
   private readonly signal: AbortSignal;
   private readonly deadline: AbortController;
   private readonly limiter?: { acquire(signal?: AbortSignal): Promise<void> };
+  private readonly timer: ReturnType<typeof setTimeout>;
+  private readonly cleanups = new Set<() => void>();
+  private isClosed = false;
 
   constructor(opts: RunOptions) {
     this.budget = new CallBudget(opts.maxCalls);
     this.deadlineMs = opts.deadlineMs ?? REPORT_DEADLINE_MS;
     this.clientSignal = opts.signal;
-    // A plain timer, held by this run: AbortSignal.timeout inside AbortSignal.any can fire late or be collected.
-    this.deadline = new AbortController();
-    const timer = setTimeout(() => this.deadline.abort(new RunAborted('deadline')), this.deadlineMs);
-    timer.unref?.();
-    this.signal = anySignal([...(opts.signal ? [opts.signal] : []), this.deadline.signal]);
     if (opts.limiter) {
       this.limiter = opts.limiter;
     } else {
       const creds = getCredentials();
-      if (creds) this.limiter = limiterFor(creds.apiKey);
+      if (creds) {
+        try {
+          this.limiter = limiterFor(creds.apiKey);
+        } catch (err) {
+          // No limiter could be made for this key (server at its key cap): the first request fails as a rate limit.
+          if (!isRateLimitError(err)) throw err;
+          this.limiter = { acquire: () => Promise.reject(err) };
+        }
+      }
     }
+    // A plain timer, held by this run: AbortSignal.timeout inside AbortSignal.any can fire late or be collected.
+    this.deadline = new AbortController();
+    this.timer = setTimeout(() => this.deadline.abort(new RunAborted('deadline')), this.deadlineMs);
+    this.timer.unref?.();
+    const joined = anySignal([...(opts.signal ? [opts.signal] : []), this.deadline.signal]);
+    this.signal = joined.signal;
+    this.cleanups.add(joined.cleanup);
+  }
+
+  /** True once `close()` has run. */
+  get closed(): boolean {
+    return this.isClosed;
+  }
+
+  /** Release the deadline timer and every abort listener this run added. Safe to call more than once. */
+  close(): void {
+    if (this.isClosed) return;
+    this.isClosed = true;
+    clearTimeout(this.timer);
+    for (const cleanup of this.cleanups) cleanup();
+    this.cleanups.clear();
   }
 
   /** A run for a tool call: `maxCalls` comes from the arguments. */
@@ -134,10 +173,15 @@ export class Run {
     const request = (async () => fn())();
     return new Promise<T>((resolve, reject) => {
       const onAbort = () => reject(this.abortError());
+      const detach = () => {
+        this.signal.removeEventListener('abort', onAbort);
+        this.cleanups.delete(detach);
+      };
       this.signal.addEventListener('abort', onAbort, { once: true });
+      this.cleanups.add(detach);
       request.then(
-        (value) => { this.signal.removeEventListener('abort', onAbort); resolve(value); },
-        (err) => { this.signal.removeEventListener('abort', onAbort); reject(err); },
+        (value) => { detach(); resolve(value); },
+        (err) => { detach(); reject(err); },
       );
     });
   }

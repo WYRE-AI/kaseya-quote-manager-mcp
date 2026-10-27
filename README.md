@@ -158,7 +158,7 @@ Copy [`.env.example`](.env.example).
 - **Hardened tool calls** — strict input schemas, untrusted-content envelope, 100 KB response
   cap, fixed error messages. See [Tool call hardening](#tool-call-hardening).
 - **Decision-tree navigation** — call `kqm_navigate` to explore a domain's tools.
-- **Rate limiting** — respects the API's 60 req/min limit with one shared limiter per API key; plain list/get calls retry on 429/5xx, reports never retry, and
+- **Rate limiting** — respects the API's 60 req/min limit with one shared limiter per API key; plain list/get calls, reports and `*_get_full` tools never retry (one limiter slot is one HTTP attempt); when 1,000 keys are all active, a new key is refused as a rate limit; and
   call budgets on every report. See [Rate budget](#rate-budget).
 - **Dual transport** — stdio (local) and HTTP Streamable (gateway/Docker).
 - **MCPB packaging** for one-click Claude Desktop install.

@@ -1,4 +1,4 @@
-import type { QuoteModel } from '@wyre-technology/node-kaseya-quote-manager';
+import type { QuoteModel } from '@wyre-ai/node-kaseya-quote-manager';
 import { getClient } from '../utils/client.js';
 import { errorStatus } from '../errors.js';
 import { intProp, MODIFIED_AFTER, readOnlyTool } from '../domains/schema.js';
@@ -18,10 +18,18 @@ export const funnelTool = readOnlyTool(
 const DAY_MS = 86_400_000;
 
 export async function runQuoteConversionFunnel(args: Record<string, unknown>, ctx: RunContext = {}) {
+  const run = Run.start(args, ctx);
+  try {
+    return await quoteConversionFunnel(run, args);
+  } finally {
+    run.close();
+  }
+}
+
+async function quoteConversionFunnel(run: Run, args: Record<string, unknown>) {
   const maxQuotes = intArg(args, 'maxQuotes', 500);
   const useOrderDate = boolArg(args, 'useOrderDate', true);
   const modifiedAfter = strArg(args, 'modifiedAfter');
-  const run = Run.start(args, ctx);
   const client = getClient({ maxRetries: 0 });
   const now = Date.now();
 

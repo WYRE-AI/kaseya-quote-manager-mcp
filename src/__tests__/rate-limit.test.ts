@@ -3,6 +3,8 @@ import { salesHandler } from '../domains/sales.js';
 import { LimiterAbortError, SlidingWindowLimiter, limiterCount, limiterFor, resetLimiters, acquireForCurrentKey } from '../utils/rate-limit.js';
 import { runWithCredentials } from '../utils/client.js';
 import { Run } from '../reports/run.js';
+import { runPipelineSummary } from '../reports/pipeline.js';
+import { RateLimitError } from '@wyre-ai/node-kaseya-quote-manager';
 
 const WINDOW = 150;
 
@@ -66,6 +68,66 @@ describe('limiterFor', () => {
     for (let i = 1; i <= 1100; i++) limiterFor(`key-${i}`);
     expect(limiterCount()).toBe(1000);
     expect(limiterFor('key-0')).not.toBe(first);
+  });
+
+  describe('at the key cap', () => {
+    beforeEach(() => resetLimiters({ limit: 2, windowMs: 60_000, maxKeys: 3 }));
+
+    it('evicts the least recently used idle key and keeps active keys with their windows', async () => {
+      const a = limiterFor('a');
+      const b = limiterFor('b');
+      const c = limiterFor('c');
+      await a.acquire();
+      await a.acquire();
+      await c.acquire();
+      // b never took a slot, so it is the only idle key.
+      const d = limiterFor('d');
+      expect(limiterCount()).toBe(3);
+      expect(limiterFor('a')).toBe(a);
+      expect(limiterFor('c')).toBe(c);
+      expect(d).not.toBe(b);
+      // a's window survived: it is still full.
+      await expect(a.acquire(AbortSignal.timeout(30))).rejects.toBeInstanceOf(LimiterAbortError);
+    });
+
+    it('picks the oldest idle key when several are idle', () => {
+      const a = limiterFor('a');
+      const b = limiterFor('b');
+      limiterFor('c');
+      limiterFor('a'); // a is now most recently used, so b is the oldest
+      limiterFor('d');
+      expect(limiterFor('a')).toBe(a);
+      expect(limiterFor('b')).not.toBe(b);
+    });
+
+    it('refuses a new key with RateLimitError when every key is active, leaving the limiters alone', async () => {
+      const existing = [limiterFor('a'), limiterFor('b'), limiterFor('c')];
+      for (const l of existing) await l.acquire();
+      expect(() => limiterFor('d')).toThrow(RateLimitError);
+      expect(limiterCount()).toBe(3);
+      expect(['a', 'b', 'c'].map((k) => limiterFor(k))).toEqual(existing);
+    });
+
+    it('a report run in that state is partial with the rate-limit reason', async () => {
+      for (const k of ['a', 'b', 'c']) await limiterFor(k).acquire();
+      const fetchMock = vi.fn(async () => new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } }));
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        const out = await runWithCredentials({ apiKey: 'newcomer' }, () => runPipelineSummary({}));
+        expect(out).toMatchObject({ partial: true, callsUsed: 0 });
+        expect(out.partialReason).toContain('rate limiting');
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('a plain tool is refused with the rate-limit error', async () => {
+      for (const k of ['a', 'b', 'c']) await limiterFor(k).acquire();
+      await runWithCredentials({ apiKey: 'newcomer' }, async () => {
+        await expect(salesHandler.handleCall('kqm_quote_list', {})).rejects.toBeInstanceOf(RateLimitError);
+      });
+    });
   });
 
   it('uses the defaults of 60 requests per 60 seconds', () => {

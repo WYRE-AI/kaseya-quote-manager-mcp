@@ -32,14 +32,18 @@ const STOPPED_BEFORE_RECORD: Record<'deadline' | 'cancelled', string> = {
 async function readFull(args: Record<string, unknown>, ctx: RunContext, build: (run: Run, id: number) => Promise<Built>) {
   const id = requireId(args.id);
   const run = Run.start(args, ctx);
-  let built: Built;
   try {
-    built = await build(run, id);
-  } catch (err) {
-    if (err instanceof RunAborted) return errorResult(STOPPED_BEFORE_RECORD[err.reason]);
-    throw err;
+    let built: Built;
+    try {
+      built = await build(run, id);
+    } catch (err) {
+      if (err instanceof RunAborted) return errorResult(STOPPED_BEFORE_RECORD[err.reason]);
+      throw err;
+    }
+    return okResult({ ...run.envelope(), complete: built.complete, ...built.data });
+  } finally {
+    run.close();
   }
-  return okResult({ ...run.envelope(), complete: built.complete, ...built.data });
 }
 
 export const quoteFullTool: ExtraTool = {

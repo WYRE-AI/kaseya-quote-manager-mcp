@@ -1,4 +1,4 @@
-import type { SalesOrderModel } from '@wyre-technology/node-kaseya-quote-manager';
+import type { SalesOrderModel } from '@wyre-ai/node-kaseya-quote-manager';
 import { getClient } from '../utils/client.js';
 import { intProp, MODIFIED_AFTER, readOnlyTool } from '../domains/schema.js';
 import { Run, type RunContext, intArg, isPositiveId, maxCallsProp, num, round1, round2, strArg } from './run.js';
@@ -14,9 +14,17 @@ export const marginTool = readOnlyTool(
 );
 
 export async function runSalesOrderMargin(args: Record<string, unknown>, ctx: RunContext = {}) {
+  const run = Run.start(args, ctx);
+  try {
+    return await salesOrderMargin(run, args);
+  } finally {
+    run.close();
+  }
+}
+
+async function salesOrderMargin(run: Run, args: Record<string, unknown>) {
   const maxOrders = intArg(args, 'maxOrders', 50);
   const modifiedAfter = strArg(args, 'modifiedAfter');
-  const run = Run.start(args, ctx);
   const client = getClient({ maxRetries: 0 });
 
   const orders = (await run.list<SalesOrderModel>((page) => client.salesOrders.list({ modifiedAfter, page, pageSize: 100 }), maxOrders)).items;
