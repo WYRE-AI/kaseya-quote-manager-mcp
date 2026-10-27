@@ -24,10 +24,10 @@ export function toolErrorMessage(err: unknown): string {
   if (err instanceof ToolArgumentError || err instanceof CredentialsError) return err.message;
   const status = errorStatus(err);
   if (err instanceof AuthenticationError || status === 401) {
-    return 'Quote Manager rejected the API key. Check the key and try again.';
+    return 'Quote Manager rejected the API key. Check the key in Quote Manager under Settings → API and try again.';
   }
   if (err instanceof ForbiddenError || status === 403) {
-    return 'This Quote Manager API key does not have access to that record or endpoint.';
+    return 'This Quote Manager API key does not have access to that record or endpoint. Ask your Quote Manager admin to check the key\'s access, or use a different key.';
   }
   if (err instanceof NotFoundError || status === 404) {
     return 'No Quote Manager record matches that ID. Check the ID with a list call.';
@@ -36,7 +36,7 @@ export function toolErrorMessage(err: unknown): string {
     return 'Quote Manager rejected the request. Check the arguments and try again.';
   }
   if (err instanceof RateLimitError || status === 429) {
-    return 'Quote Manager rate limit reached (60 requests a minute, 10,000 a day). Wait and try again.';
+    return 'Quote Manager is rate limiting requests (60 a minute, 10,000 a day per API key). Wait a minute and try again. If it keeps happening, the daily limit may be used up.';
   }
   if (err instanceof ServerError || (status !== undefined && status >= 500)) {
     return 'Quote Manager had a server error. Try again later.';

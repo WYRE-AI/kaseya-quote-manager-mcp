@@ -6,7 +6,7 @@ import { DEFAULT_MAX_CALLS } from './budget.js';
 
 export const marginTool = readOnlyTool(
   'kqm_sales_order_margin_report',
-  'Revenue, cost and margin per sales order, from each order line\'s own price and cost. Read-only. One request per page of orders plus one per order for its lines. See docs/REPORTS.md.',
+  'Report revenue, cost and margin per sales order, from each sales order line\'s own price and cost. Read-only. One request per page of sales orders plus one per sales order for its lines. See docs/REPORTS.md.',
   {
     modifiedAfter: MODIFIED_AFTER,
     maxOrders: intProp('Maximum sales orders to scan (default 50)', 1, 200, 50),
@@ -69,7 +69,7 @@ export async function runSalesOrderMargin(args: Record<string, unknown>) {
     ordersScanned: orders.length,
     ordersPriced: rows.length,
     method:
-      'Revenue = sum of line price x quantity; cost = sum of line cost x quantity; margin = revenue - cost. All figures are before tax and discounts and exclude delivery. Lines with no cost still count toward revenue, add 0 cost and are counted in linesMissingCost, so margin is overstated when linesMissingCost > 0. Orders whose lines could not be read within the call budget are left out.',
+      'Revenue = sum of line price x quantity; cost = sum of line cost x quantity; margin = revenue - cost. All figures are before tax and discounts and exclude delivery. Lines with no cost still count toward revenue, add 0 cost and are counted in linesMissingCost, so margin is overstated when linesMissingCost > 0. Sales orders whose lines could not be read before the call budget ran out or Quote Manager rate limited requests are left out (see ordersPriced).',
     ...run.envelope(),
   };
 }

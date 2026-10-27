@@ -127,7 +127,7 @@ describe('gateway mode', () => {
     process.env.KASEYA_QUOTE_MANAGER_API_KEY = 'env-key';
     expect(() => getClient()).toThrow(CredentialsError);
     expect(() => getClient()).toThrow(
-      'No Quote Manager API key on this request. The gateway must send x-kaseya-quote-manager-api-key.',
+      'No Quote Manager API key on this request. Reconnect Quote Manager with an API key, or check that the gateway sends the X-Kaseya-Quote-Manager-Api-Key header.',
     );
   });
 

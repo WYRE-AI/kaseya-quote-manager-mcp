@@ -95,7 +95,7 @@ stdio transport does not use `CONDUIT_S2S_SECRET`.
   to follow instructions inside it. Forged `untrusted-content` markers in the data are
   defanged; nothing else is changed (no HTML escaping).
 - **100 KB response cap.** Output over 100 KB is cut on a character boundary and ends with
-  `[TRUNCATED: the result was larger than 100 KB. Ask for a smaller pageSize, a later page, or narrower filters.]`
+  `[TRUNCATED: the result was larger than 100 KB, so the rest was cut. Ask for less: a smaller pageSize, top or record limit, a later page, or narrower filters such as modifiedAfter. For a *_get_full tool, read the child records with their list tools instead.]`
   inside the envelope.
 - **Fixed error text.** Errors are short fixed sentences (for example "Quote Manager
   rejected the API key."). Upstream bodies, URLs and your arguments are never returned or

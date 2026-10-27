@@ -6,7 +6,7 @@ import { DEFAULT_MAX_CALLS } from './budget.js';
 
 export const velocityTool = readOnlyTool(
   'kqm_product_velocity_report',
-  'Best-selling products by units and revenue across sales order lines. Read-only. One request per 100 sales order lines, then (with what is left of maxCalls) one per 100 sales orders when includeCustomers is true. See docs/REPORTS.md.',
+  'Rank best-selling products by units and revenue across sales order lines. Read-only. One request per 100 sales order lines, then, with includeCustomers, one per 100 sales orders from the calls left in maxCalls. See docs/REPORTS.md.',
   {
     modifiedAfter: MODIFIED_AFTER,
     maxLines: intProp('Maximum sales order lines to scan (default 2000)', 1, 10000, 2000),

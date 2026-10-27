@@ -31,6 +31,18 @@ describe('domain handlers', () => {
     }
   });
 
+  it('every tool description, including navigate and status, is under 300 characters', async () => {
+    const tools = [...getNavigationTools()];
+    for (const domain of DOMAINS) {
+      tools.push(...(await getDomainHandler(domain)).getTools());
+    }
+    expect(tools.length).toBeGreaterThan(48);
+    for (const tool of tools) {
+      expect(tool.description, tool.name).toBeTruthy();
+      expect(tool.description!.length, `${tool.name} description length`).toBeLessThan(300);
+    }
+  });
+
   it('every entity exposes a *_list tool', async () => {
     const all: string[] = [];
     for (const domain of DOMAINS) {

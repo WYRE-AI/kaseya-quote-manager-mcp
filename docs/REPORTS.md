@@ -8,15 +8,15 @@ only call `list` and `get` on the Quote Manager API.
 - **Call budget.** Every report takes `maxCalls` (integer, 1–500, default 60). Each Quote
   Manager request counts as one call. When the budget is spent the report stops, computes
   from what it has, and returns `partial: true` with
-  `Stopped at maxCalls (N API calls). Narrow the request with modifiedAfter or a smaller limit, or raise maxCalls.`
+  `Stopped at maxCalls (N API calls), so these figures cover only the records read so far. Narrow the request with modifiedAfter or a smaller limit, or raise maxCalls.`
 - **Record limits.** Each report has a cap on the records it scans (`maxQuotes`,
   `maxOrders`, `maxLines`, `maxPurchaseOrders`). If the cap is reached while more records
   may exist (the last page was full, or the page held more than the cap) the result is
   `partial: true` with
-  `Stopped at the record limit. Narrow the request with modifiedAfter or raise the limit.`
+  `Stopped at the record limit (maxQuotes, maxOrders, maxLines or maxPurchaseOrders), so more records may exist. Narrow the request with modifiedAfter or raise that limit.`
 - **Rate limit.** If Quote Manager returns 429 mid-run the report keeps what it gathered and
   returns `partial: true` with
-  `Stopped early because Quote Manager rate-limited the key. Try again later or narrow the request.`
+  `Stopped early because Quote Manager is rate limiting requests (HTTP 429), so these figures cover only the records read before that. Wait a minute and try again, or narrow the request with modifiedAfter.`
   Any other upstream error fails the call with the usual fixed error message.
 - **Requests.** Sequential, one client per run (so the SDK's 60-a-minute limiter applies
   across the whole run), one retry at most. Lists are read as 1-based pages of 100; a page
@@ -66,7 +66,7 @@ true), `maxCalls`.
 - `byStatus`: counts by raw status code.
 - `converted`: `salesOrderId` is a positive number.
 - `expiredUnconverted`: not converted and `expiryDate` is before now.
-- `conversionRate` = converted / quotesScanned (4 decimals; null with no quotes).
+- `conversionRate` = `converted` / `quotesScanned` (4 decimals; null with no quotes).
 - `winRate` = converted / (converted + expiredUnconverted) (null when the denominator is 0).
 - `averageDaysToClose` = mean of (close date − `createdDate`) in days over converted quotes,
   1 decimal (null with none). Close date is the linked sales order's `orderDate` when it was
@@ -123,7 +123,7 @@ result is `partial`.
 
 ## kqm_purchase_vs_sales_reconciliation
 
-**Inputs:** `salesOrderID` (required), `modifiedAfter?` (narrows the purchase order scan),
+**Inputs:** `salesOrderID` (required), `modifiedAfter?` (narrows the purchase order scan; purchase orders last changed before it are skipped, so leave it out unless the scan runs out of calls),
 `maxPurchaseOrders` (1–2000, default 500), `maxCalls`.
 
 **Calls:** 1 sales order line list + `ceil(purchase orders / 100)` + 1 line list per

@@ -63,7 +63,7 @@ export function createServer(): Server {
 
     try {
       if (name === 'kqm_navigate' && !DOMAINS.includes(args.domain as DomainName)) {
-        return errorResult(`Invalid domain. Valid: ${DOMAINS.join(', ')}`);
+        return errorResult(`Invalid domain. Use one of: ${DOMAINS.join(', ')}.`);
       }
       validateArgs(entry.tool.inputSchema as ObjectSchema, args);
 

@@ -9,7 +9,7 @@ import { DEFAULT_MAX_CALLS } from './budget.js';
 const fullTool = (name: string, what: string, idLabel: string) =>
   readOnlyTool(
     name,
-    `Get a ${what}. Read-only. Convenience tool that makes several requests (counted against maxCalls); the result is partial if maxCalls is reached. See docs/REPORTS.md.`,
+    `Get a ${what}. Read-only. Makes several requests, counted against maxCalls; the result is partial if maxCalls is reached. See docs/REPORTS.md.`,
     { id: idProp(`${idLabel} ID`), maxCalls: maxCallsProp },
     ['id'],
   );

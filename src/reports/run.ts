@@ -3,7 +3,7 @@ import { intProp, type Prop } from '../domains/schema.js';
 import { BudgetExhausted, CallBudget, paginate, PAGE_SIZE, DEFAULT_MAX_CALLS, MAX_CALLS_LIMIT, type PageResult, type StopReason } from './budget.js';
 
 export const maxCallsProp: Prop = intProp(
-  'Maximum Quote Manager API requests this report may make (each request counts as one). The report stops and returns partial results at this limit.',
+  'Maximum Quote Manager API requests this tool may make (each request counts as one). It stops and returns partial results at this limit.',
   1,
   MAX_CALLS_LIMIT,
   DEFAULT_MAX_CALLS,
@@ -34,8 +34,8 @@ export const round4 = (v: number): number => Math.round((v + Number.EPSILON) * 1
 
 export const isPositiveId = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v > 0;
 
-const RATE_LIMIT_REASON = 'Stopped early because Quote Manager rate-limited the key. Try again later or narrow the request.';
-const RECORD_LIMIT_REASON = 'Stopped at the record limit. Narrow the request with modifiedAfter or raise the limit.';
+const RATE_LIMIT_REASON = 'Stopped early because Quote Manager is rate limiting requests (HTTP 429), so these figures cover only the records read before that. Wait a minute and try again, or narrow the request with modifiedAfter.';
+const RECORD_LIMIT_REASON = 'Stopped at the record limit (maxQuotes, maxOrders, maxLines or maxPurchaseOrders), so more records may exist. Narrow the request with modifiedAfter or raise that limit.';
 const PRIORITY: Record<StopReason, number> = { complete: 0, maxItems: 1, budget: 2, rateLimit: 3 };
 
 /** State for one report run: one call budget, sequential requests, and the first/most serious stop reason. */
@@ -82,7 +82,7 @@ export class Run {
         : this.reason === 'rateLimit'
           ? RATE_LIMIT_REASON
           : this.reason === 'budget'
-            ? `Stopped at maxCalls (${this.budget.maxCalls} API calls). Narrow the request with modifiedAfter or a smaller limit, or raise maxCalls.`
+            ? `Stopped at maxCalls (${this.budget.maxCalls} API calls), so these figures cover only the records read so far. Narrow the request with modifiedAfter or a smaller limit, or raise maxCalls.`
             : RECORD_LIMIT_REASON;
     return {
       partial: partialReason !== undefined,

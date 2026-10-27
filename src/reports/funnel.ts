@@ -7,7 +7,7 @@ import { DEFAULT_MAX_CALLS } from './budget.js';
 
 export const funnelTool = readOnlyTool(
   'kqm_quote_conversion_funnel',
-  'Quote conversion funnel: counts by raw status code, converted quotes (linked sales order), expired unconverted quotes, conversion rate, inferred win rate and average days to close. Read-only. One request per page of quotes, plus one per converted quote when useOrderDate is true. See docs/REPORTS.md.',
+  'Measure quote conversion: counts by raw status code, converted quotes (linked sales order), expired unconverted quotes, conversion rate, inferred win rate and average days to close. Read-only. One request per page of quotes, plus one per converted quote with useOrderDate. See docs/REPORTS.md.',
   {
     modifiedAfter: MODIFIED_AFTER,
     maxQuotes: intProp('Maximum quotes to scan (default 500)', 1, 2000, 500),

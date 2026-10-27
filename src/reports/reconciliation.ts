@@ -7,7 +7,7 @@ import { requireId } from '../validate.js';
 
 export const reconciliationTool = readOnlyTool(
   'kqm_purchase_vs_sales_reconciliation',
-  'Compare what a sales order sold with what was purchased and received for it, by product. Read-only. Scans purchase orders (Quote Manager cannot filter them by sales order): one request per page of purchase orders, one for the sales order lines, and one per matching purchase order for its lines. See docs/REPORTS.md.',
+  'Compare what a sales order sold with what was purchased and received for it, by product. Read-only. Scans purchase orders, since Quote Manager can\'t filter them by sales order: one request per page, one for the sales order lines and one per matching purchase order. See docs/REPORTS.md.',
   {
     salesOrderID: idProp('Sales order to reconcile'),
     modifiedAfter: MODIFIED_AFTER,
@@ -96,7 +96,7 @@ export async function runPurchaseVsSales(args: Record<string, unknown>) {
     purchaseOrdersMatched: matched.length,
     purchaseOrdersRead,
     ...(envelope.partial
-      ? { warning: 'Not every record was read, so a purchase order may be missing and not_purchased or under_purchased may be wrong.' }
+      ? { warning: 'Not every record was read, so a purchase order may be missing and not_purchased or under_purchased may be wrong. Raise maxCalls or maxPurchaseOrders and run it again.' }
       : {}),
     method:
       'Products are joined by productID. Sold = sum of sales order line quantity; purchased and received = sums of quantity and quantityReceived on the lines of purchase orders whose salesOrderID matches. Status: matched (purchased = sold), under_purchased, over_purchased, not_purchased (on the sales order, no purchase order line), not_on_sales_order (purchased but not sold). fullyReceived = received >= purchased, null when nothing was purchased. Lines without a productID cannot be joined and are only counted in unmatchedLines. Quote Manager cannot filter purchase orders by sales order, so purchase orders are scanned and filtered client-side.',

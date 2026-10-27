@@ -42,7 +42,7 @@ function checkValue(name: string, prop: PropSchema, value: unknown): void {
   } else if (prop.type === 'boolean') {
     if (typeof value !== 'boolean') bad(`Invalid ${name}. Use true or false.`);
   } else {
-    bad(`Invalid ${name}.`);
+    bad(`Invalid ${name}. Check the tool input schema.`);
   }
 }
 
@@ -60,7 +60,7 @@ export function validateArgs(schema: ObjectSchema, args: Record<string, unknown>
     }
   }
   for (const name of schema.required ?? []) {
-    if (args[name] === undefined) throw new ToolArgumentError(`Missing required argument: ${name}.`);
+    if (args[name] === undefined) throw new ToolArgumentError(`Missing required argument: ${name}. Add it and try again.`);
   }
   for (const [name, value] of Object.entries(args)) {
     if (value !== undefined) checkValue(name, props[name], value);

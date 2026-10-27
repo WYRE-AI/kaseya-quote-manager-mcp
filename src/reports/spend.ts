@@ -6,7 +6,7 @@ import { DEFAULT_MAX_CALLS } from './budget.js';
 
 export const spendTool = readOnlyTool(
   'kqm_customer_spend_summary',
-  'Revenue, cost, payments and estimated outstanding balance per customer, ranked by revenue. Read-only. One request per page of orders plus, per matching order, one for its lines and one for its payments. Customer names are not included; use kqm_customer_get. See docs/REPORTS.md.',
+  'Summarize revenue, cost, payments and estimated outstanding balance per customer, ranked by revenue. Read-only. One request per page of sales orders plus two per matching sales order (lines and payments). Names aren\'t included; use kqm_customer_get. See docs/REPORTS.md.',
   {
     customerID: idProp('Only include this customer (filtered client-side from the scanned orders)'),
     modifiedAfter: MODIFIED_AFTER,
@@ -76,7 +76,7 @@ export async function runCustomerSpend(args: Record<string, unknown>) {
     ordersMatched: matched.length,
     ordersPriced,
     method:
-      'Revenue = sum of line price x quantity + order deliveryAmount, before tax. Cost = sum of line cost x quantity (missing cost counts as 0). Payments = sum of payment amounts. outstandingEstimate = max(0, revenue + line tax + deliveryTax - payments) per customer and is INFERRED: each line\'s tax is treated as the line\'s total tax, not a per-unit amount. Quote Manager has no customer filter on sales orders, so customerID filters the scanned orders client-side. Customers are ranked by revenue; names are not fetched, use kqm_customer_get.',
+      'Revenue = sum of line price x quantity + order deliveryAmount, before tax. Cost = sum of line cost x quantity (missing cost counts as 0, so cost can be understated). Payments = sum of payment amounts. outstandingEstimate = max(0, revenue + line tax + deliveryTax - payments) per customer and is INFERRED: each line\'s tax is treated as the line\'s total tax, not a per-unit amount. Quote Manager has no customer filter on sales orders, so customerID filters the scanned orders client-side. Customers are ranked by revenue; names are not fetched, use kqm_customer_get. Sales orders whose lines or payments could not be read are left out (see ordersPriced).',
     ...run.envelope(),
   };
 }

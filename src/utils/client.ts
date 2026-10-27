@@ -37,7 +37,7 @@ export function getClient(options: { maxRetries?: number } = {}): KaseyaQuoteMan
   if (!creds) {
     throw new CredentialsError(
       gatewayMode
-        ? 'No Quote Manager API key on this request. The gateway must send x-kaseya-quote-manager-api-key.'
+        ? 'No Quote Manager API key on this request. Reconnect Quote Manager with an API key, or check that the gateway sends the X-Kaseya-Quote-Manager-Api-Key header.'
         : 'No Quote Manager API key configured. Set KASEYA_QUOTE_MANAGER_API_KEY.',
     );
   }

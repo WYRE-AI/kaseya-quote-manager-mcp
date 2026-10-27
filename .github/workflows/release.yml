@@ -1,6 +1,6 @@
 name: Release
 
-# Release is intentionally manual-only until Aaron approves the next publish.
+# Release is manual-only for now.
 on:
   workflow_dispatch:
 

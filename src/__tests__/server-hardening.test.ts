@@ -84,7 +84,7 @@ describe('argument validation through the server', () => {
 
   it('rejects missing required arguments by schema name', async () => {
     const res = await session.call('kqm_quote_get', {});
-    expect(res.content[0].text).toBe('Missing required argument: id.');
+    expect(res.content[0].text).toBe('Missing required argument: id. Add it and try again.');
   });
 
   it.each([['../x'], ['1/2'], [''], [0], [-1], [1.5], ['%2e%2e'], ['1'], [null], [Number.MAX_SAFE_INTEGER + 2], [{}], [[1]]])(
@@ -109,7 +109,7 @@ describe('argument validation through the server', () => {
       ['kqm_quote_list', { modifiedAfter: '' }, 'Invalid modifiedAfter. Use an ISO 8601 date or timestamp, for example 2026-01-31T00:00:00Z.'],
       ['kqm_pipeline_summary', { includeCost: 'yes' }, 'Invalid includeCost. Use true or false.'],
       ['kqm_pipeline_summary', { maxCalls: 501 }, 'Invalid maxCalls. Use a whole number from 1 to 500.'],
-      ['kqm_purchase_vs_sales_reconciliation', {}, 'Missing required argument: salesOrderID.'],
+      ['kqm_purchase_vs_sales_reconciliation', {}, 'Missing required argument: salesOrderID. Add it and try again.'],
     ];
     for (const [tool, args, message] of cases) {
       const res = await session.call(tool, args);
@@ -140,7 +140,7 @@ describe('argument validation through the server', () => {
   it('kqm_navigate rejects an invalid domain without echo and lists tools for a valid one', async () => {
     const bad = await session.call('kqm_navigate', { domain: 'nope<script>' });
     expect(bad.isError).toBe(true);
-    expect(bad.content[0].text).toBe('Invalid domain. Valid: sales, procurement, catalog, crm, org, reports');
+    expect(bad.content[0].text).toBe('Invalid domain. Use one of: sales, procurement, catalog, crm, org, reports.');
     const good = await session.call('kqm_navigate', { domain: 'reports' });
     expect(good.content[0].text).toContain('kqm_pipeline_summary');
   });
@@ -230,7 +230,7 @@ describe('untrusted-content envelope', () => {
     const res = await session.call('kqm_customer_get', { id: 1 });
     const inner = unwrapText(res.content[0].text);
     expect(inner.endsWith(TRUNCATION_NOTE)).toBe(true);
-    expect(inner).toContain('[TRUNCATED: the result was larger than 100 KB.');
+    expect(inner).toContain("[TRUNCATED: the result was larger than 100 KB, so the rest was cut. Ask for less: a smaller pageSize, top or record limit, a later page, or narrower filters such as modifiedAfter. For a *_get_full tool, read the child records with their list tools instead.]");
     expect(inner).not.toContain('�');
     expect(Buffer.byteLength(inner)).toBeLessThanOrEqual(MAX_RESPONSE_BYTES + Buffer.byteLength(TRUNCATION_NOTE));
   });
@@ -248,14 +248,14 @@ describe('untrusted-content envelope', () => {
 
 describe('error mapping', () => {
   it.each([
-    [new AuthenticationError('x', null), 'Quote Manager rejected the API key. Check the key and try again.'],
-    [new ForbiddenError('x', null), 'This Quote Manager API key does not have access to that record or endpoint.'],
+    [new AuthenticationError('x', null), 'Quote Manager rejected the API key. Check the key in Quote Manager under Settings → API and try again.'],
+    [new ForbiddenError('x', null), 'This Quote Manager API key does not have access to that record or endpoint. Ask your Quote Manager admin to check the key\'s access, or use a different key.'],
     [new NotFoundError('x', null), 'No Quote Manager record matches that ID. Check the ID with a list call.'],
     [new ValidationError('x', [], null), 'Quote Manager rejected the request. Check the arguments and try again.'],
-    [new RateLimitError('x', 1, null), 'Quote Manager rate limit reached (60 requests a minute, 10,000 a day). Wait and try again.'],
+    [new RateLimitError('x', 1, null), 'Quote Manager is rate limiting requests (60 a minute, 10,000 a day per API key). Wait a minute and try again. If it keeps happening, the daily limit may be used up.'],
     [new ServerError('x', null), 'Quote Manager had a server error. Try again later.'],
     [Object.assign(new Error('boom'), { statusCode: 503 }), 'Quote Manager had a server error. Try again later.'],
-    [Object.assign(new Error('boom'), { statusCode: 401 }), 'Quote Manager rejected the API key. Check the key and try again.'],
+    [Object.assign(new Error('boom'), { statusCode: 401 }), 'Quote Manager rejected the API key. Check the key in Quote Manager under Settings → API and try again.'],
     [new Error('SECRET_BODY'), 'Quote Manager request failed. Try again later.'],
     ['a string', 'Quote Manager request failed. Try again later.'],
     [null, 'Quote Manager request failed. Try again later.'],
@@ -275,10 +275,10 @@ describe('error mapping', () => {
 
   it('maps a missing credential error from getClient', async () => {
     vi.mocked(getClient).mockImplementation(() => {
-      throw new CredentialsError('No Quote Manager API key on this request. The gateway must send x-kaseya-quote-manager-api-key.');
+      throw new CredentialsError('No Quote Manager API key on this request. Reconnect Quote Manager with an API key, or check that the gateway sends the X-Kaseya-Quote-Manager-Api-Key header.');
     });
     const res = await session.call('kqm_quote_get', { id: 1 });
-    expect(res.content[0].text).toBe('No Quote Manager API key on this request. The gateway must send x-kaseya-quote-manager-api-key.');
+    expect(res.content[0].text).toBe('No Quote Manager API key on this request. Reconnect Quote Manager with an API key, or check that the gateway sends the X-Kaseya-Quote-Manager-Api-Key header.');
   });
 });
 

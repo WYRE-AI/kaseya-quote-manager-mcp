@@ -33,7 +33,7 @@
         },
         {
           "name": "AUTH_MODE",
-          "description": "HTTP credential source: 'gateway' (default when unset) expects header injection from the WYRE MCP Gateway, 'env' reads vars locally. Any other value refuses to start. Stdio ignores this.",
+          "description": "HTTP credential source: 'gateway' (default when unset) expects the X-Kaseya-Quote-Manager-Api-Key header from the WYRE AI gateway; 'env' reads KASEYA_QUOTE_MANAGER_API_KEY. Any other value refuses to start. Stdio ignores this.",
           "isRequired": false,
           "default": "gateway",
           "format": "string"

@@ -6,7 +6,7 @@ import { DEFAULT_MAX_CALLS } from './budget.js';
 
 export const pipelineTool = readOnlyTool(
   'kqm_pipeline_summary',
-  'Quote pipeline grouped by raw status code: quote count, total value and (optionally) estimated cost and margin. Read-only. Makes one request per page of quotes, one per quote for sections, one per selected section for lines, plus one per distinct product when includeCost is true. See docs/REPORTS.md.',
+  'Summarize the quote pipeline by raw status code: quote count, total value and, with includeCost, estimated cost and margin. Read-only. One request per page of quotes, one per quote, one per selected section and, with includeCost, one per product. See docs/REPORTS.md.',
   {
     modifiedAfter: MODIFIED_AFTER,
     maxQuotes: intProp('Maximum quotes to scan (default 50)', 1, 200, 50),
@@ -105,7 +105,7 @@ export async function runPipelineSummary(args: Record<string, unknown>) {
       (includeCost
         ? 'Cost is INFERRED: quote lines carry no cost, so each line uses the lowest supplier cost for its product; lines without a product or supplier cost are counted in linesWithoutCost and add no cost, so margin is overstated. '
         : '') +
-      'Quotes whose lines could not be read within the call budget are counted but not priced.',
+      'Quotes whose lines could not be read before the call budget ran out or Quote Manager rate limited requests are counted but not priced.',
     ...run.envelope(),
   };
 }

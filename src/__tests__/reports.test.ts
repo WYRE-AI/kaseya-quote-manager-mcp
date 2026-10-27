@@ -21,9 +21,9 @@ beforeEach(() => {
 
 const report = async (tool: string, args: Record<string, unknown> = {}) => unwrap(await reportsHandler.handleCall(tool, args));
 const rows = (n: number, make: (i: number) => object = (i) => ({ id: i + 1 })) => Array.from({ length: n }, (_, i) => make(i));
-const PARTIAL_BUDGET = (n: number) => `Stopped at maxCalls (${n} API calls). Narrow the request with modifiedAfter or a smaller limit, or raise maxCalls.`;
-const PARTIAL_RECORDS = 'Stopped at the record limit. Narrow the request with modifiedAfter or raise the limit.';
-const PARTIAL_RATE = 'Stopped early because Quote Manager rate-limited the key. Try again later or narrow the request.';
+const PARTIAL_BUDGET = (n: number) => `Stopped at maxCalls (${n} API calls), so these figures cover only the records read so far. Narrow the request with modifiedAfter or a smaller limit, or raise maxCalls.`;
+const PARTIAL_RECORDS = 'Stopped at the record limit (maxQuotes, maxOrders, maxLines or maxPurchaseOrders), so more records may exist. Narrow the request with modifiedAfter or raise that limit.';
+const PARTIAL_RATE = 'Stopped early because Quote Manager is rate limiting requests (HTTP 429), so these figures cover only the records read before that. Wait a minute and try again, or narrow the request with modifiedAfter.';
 
 describe('paginate / CallBudget', () => {
   it('counts calls and throws when exhausted', async () => {

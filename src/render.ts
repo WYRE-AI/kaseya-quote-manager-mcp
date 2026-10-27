@@ -3,7 +3,7 @@ import type { CallToolResult } from './utils/types.js';
 
 export const MAX_RESPONSE_BYTES = 100 * 1024;
 export const TRUNCATION_NOTE =
-  '\n[TRUNCATED: the result was larger than 100 KB. Ask for a smaller pageSize, a later page, or narrower filters.]';
+  '\n[TRUNCATED: the result was larger than 100 KB, so the rest was cut. Ask for less: a smaller pageSize, top or record limit, a later page, or narrower filters such as modifiedAfter. For a *_get_full tool, read the child records with their list tools instead.]';
 
 /** Pretty JSON, cut to MAX_RESPONSE_BYTES on a character boundary with a note. */
 export function renderResponse(value: unknown): string {
