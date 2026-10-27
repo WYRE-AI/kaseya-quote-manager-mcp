@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Six read-only report tools in a new `reports` domain: `kqm_pipeline_summary`,
+  `kqm_quote_conversion_funnel`, `kqm_sales_order_margin_report`,
+  `kqm_customer_spend_summary`, `kqm_product_velocity_report`, and
+  `kqm_purchase_vs_sales_reconciliation`. Each has a `maxCalls` budget (default 60, max 500),
+  returns `partial`/`partialReason`/`callsUsed`/`method`, and degrades to partial results on
+  rate limits. See `docs/REPORTS.md`.
+- `kqm_quote_get_full`, `kqm_sales_order_get_full`, and `kqm_purchase_order_get_full`
+  convenience tools.
+- Untrusted-content envelope around every successful tool result, a 100 KB response cap with a
+  truncation note, and strict tool input schemas (`additionalProperties: false`, integer IDs of
+  at least 1, bounded `pageSize` and string lengths) with runtime validation that never echoes
+  caller values.
+
+### Changed
+
+- HTTP `AUTH_MODE` now defaults to `gateway` when unset or empty, and only the exact values
+  `gateway` and `env` are accepted; anything else refuses to start. Gateway mode never reads
+  `KASEYA_QUOTE_MANAGER_API_KEY`.
+- Tool errors are fixed, caller-safe messages. Upstream bodies, URLs, arguments and IDs are no
+  longer returned or logged.
+- `.github/workflows/release.yml` is now `workflow_dispatch` only until the next publish is approved.
+
+### Security
+
+- `CONDUIT_S2S_SECRET` must be at least 32 characters, and `MCP_ALLOW_INSECURE_DEV` is refused
+  unless `NODE_ENV=development`.
+- `/mcp` rejects bodies over 256 KiB with 413 (after the S2S check) and caps chunked bodies in
+  the transport. Tool input over 10,000 values is refused.
+- HTTP request failures return a fixed 500 and no longer log the error object.
+
+### Removed
+
+- Unused `src/elicitation/forms.ts`.
+
+## Initial release
+
+### Added
+
 - Initial release of the Kaseya Quote Manager (Datto Commerce) MCP server.
 - Read-only access to all 20 Quote Manager resources via 39 entity tools, grouped into
   5 navigable domains: `sales`, `procurement`, `catalog`, `crm`, and `org`.

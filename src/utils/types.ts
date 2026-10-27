@@ -1,6 +1,6 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 
-export type DomainName = 'sales' | 'procurement' | 'catalog' | 'crm' | 'org';
+export type DomainName = 'sales' | 'procurement' | 'catalog' | 'crm' | 'org' | 'reports';
 
 export type CallToolResult = {
   content: Array<{ type: 'text'; text: string }>;

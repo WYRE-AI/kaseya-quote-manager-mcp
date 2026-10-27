@@ -33,8 +33,9 @@ vi.mock('../utils/client.js', async (importOriginal) => {
 });
 
 import { KNOWN_PLACEHOLDER_SECRETS, startHttpServer } from '../http.js';
+import { unwrapText } from './helpers/unwrap.js';
 
-const S2S_SECRET = 's2s-do-not-log-7f3a';
+const S2S_SECRET = 's2s-do-not-log-7f3a-0123456789abcdef';
 const ENV_API_KEY = 'env-api-key-must-not-be-used';
 const HEADER_API_KEY = 'header-api-key-must-not-leak';
 
@@ -44,6 +45,7 @@ const ENV_KEYS = [
   'MCP_HTTP_PORT',
   'MCP_HTTP_HOST',
   'AUTH_MODE',
+  'NODE_ENV',
   'KASEYA_QUOTE_MANAGER_API_KEY',
   'LOG_LEVEL',
   'MCP_TRANSPORT',
@@ -174,6 +176,7 @@ beforeEach(() => {
   delete process.env.CONDUIT_S2S_SECRET;
   delete process.env.MCP_ALLOW_INSECURE_DEV;
   delete process.env.AUTH_MODE;
+  process.env.NODE_ENV = 'development';
   delete process.env.KASEYA_QUOTE_MANAGER_API_KEY;
   delete process.env.MCP_TRANSPORT;
   runSpy.mockReset();
@@ -426,7 +429,7 @@ describe('HTTP /mcp authentication', () => {
         result?: { content?: Array<{ text?: string }> };
       };
       const text = payload.result?.content?.[0]?.text ?? '';
-      const status = JSON.parse(text) as { connected?: boolean };
+      const status = JSON.parse(unwrapText(text)) as { connected?: boolean };
       expect(status.connected).toBe(true);
       assertNoSecrets(response.body);
       assertNoSecrets(logs.text());
@@ -481,7 +484,7 @@ describe('HTTP AUTH_MODE=env', () => {
       result?: { content?: Array<{ text?: string }> };
     };
     const text = payload.result?.content?.[0]?.text ?? '';
-    const status = JSON.parse(text) as { connected?: boolean };
+    const status = JSON.parse(unwrapText(text)) as { connected?: boolean };
     expect(status.connected).toBe(true);
     assertNoSecrets(response.body);
     expect(runSpy).not.toHaveBeenCalled();

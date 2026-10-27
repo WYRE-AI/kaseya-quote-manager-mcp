@@ -33,9 +33,9 @@
         },
         {
           "name": "AUTH_MODE",
-          "description": "Credential source: 'env' reads vars locally, 'gateway' expects header injection from the WYRE MCP Gateway.",
+          "description": "HTTP credential source: 'gateway' (default when unset) expects header injection from the WYRE MCP Gateway, 'env' reads vars locally. Any other value refuses to start. Stdio ignores this.",
           "isRequired": false,
-          "default": "env",
+          "default": "gateway",
           "format": "string"
         },
         {

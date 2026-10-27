@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { getCredentials, getClient, runWithCredentials } from '../utils/client.js';
+import { getCredentials, getClient, runWithCredentials, setGatewayMode } from '../utils/client.js';
+import { CredentialsError } from '../errors.js';
 
 describe('getCredentials', () => {
   const originalEnv = process.env.KASEYA_QUOTE_MANAGER_API_KEY;
@@ -76,7 +77,7 @@ describe('getClient', () => {
 
   it('throws when no credentials are available', () => {
     delete process.env.KASEYA_QUOTE_MANAGER_API_KEY;
-    expect(() => getClient()).toThrow('No Kaseya Quote Manager credentials configured');
+    expect(() => getClient()).toThrow('No Quote Manager API key configured. Set KASEYA_QUOTE_MANAGER_API_KEY.');
   });
 
   it('returns a client when env var is set', () => {
@@ -100,5 +101,39 @@ describe('getClient', () => {
       client = getClient();
     });
     expect(client).toBeTruthy();
+  });
+});
+
+describe('gateway mode', () => {
+  beforeEach(() => setGatewayMode(true));
+  afterEach(() => {
+    setGatewayMode(false);
+    delete process.env.KASEYA_QUOTE_MANAGER_API_KEY;
+  });
+
+  it('never reads KASEYA_QUOTE_MANAGER_API_KEY from the environment', () => {
+    process.env.KASEYA_QUOTE_MANAGER_API_KEY = 'env-key';
+    expect(getCredentials()).toBeNull();
+  });
+
+  it('still returns request-scoped credentials', () => {
+    process.env.KASEYA_QUOTE_MANAGER_API_KEY = 'env-key';
+    runWithCredentials({ apiKey: 'scoped-key' }, () => {
+      expect(getCredentials()).toEqual({ apiKey: 'scoped-key' });
+    });
+  });
+
+  it('getClient throws a CredentialsError that names the gateway header', () => {
+    process.env.KASEYA_QUOTE_MANAGER_API_KEY = 'env-key';
+    expect(() => getClient()).toThrow(CredentialsError);
+    expect(() => getClient()).toThrow(
+      'No Quote Manager API key on this request. The gateway must send x-kaseya-quote-manager-api-key.',
+    );
+  });
+
+  it('passes maxRetries through without error', () => {
+    runWithCredentials({ apiKey: 'k' }, () => {
+      expect(getClient({ maxRetries: 1 })).toBeTruthy();
+    });
   });
 });
