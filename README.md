@@ -2,7 +2,7 @@
 
 [![Build Status](https://github.com/WYRE-AI/kaseya-quote-manager-mcp/actions/workflows/release.yml/badge.svg)](https://github.com/WYRE-AI/kaseya-quote-manager-mcp/actions/workflows/release.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22.12.0-brightgreen.svg)](https://nodejs.org/)
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that gives AI
 assistants **read-only** access to [Kaseya Quote Manager](https://help.quotemanager.kaseya.com/)
@@ -158,7 +158,7 @@ Copy [`.env.example`](.env.example).
 - **Hardened tool calls** — strict input schemas, untrusted-content envelope, 100 KB response
   cap, fixed error messages. See [Tool call hardening](#tool-call-hardening).
 - **Decision-tree navigation** — call `kqm_navigate` to explore a domain's tools.
-- **Rate limiting** — respects the API's 60 req/min limit with one shared limiter per API key; plain list/get calls, reports and `*_get_full` tools never retry (one limiter slot is one HTTP attempt); when 1,000 keys are all active, a new key is refused as a rate limit; and
+- **Rate limiting** — respects the API's 60 req/min limit with one shared limiter per API key; plain list/get calls, reports and `*_get_full` tools never retry (one limiter slot is one HTTP attempt); a key is tracked only after a successful response (at most 10,000 keys; at the cap the least recently used idle key is dropped, and if every key is busy the new key gets a temporary limiter), so the limiter never refuses a request; and
   call budgets on every report. See [Rate budget](#rate-budget).
 - **Dual transport** — stdio (local) and HTTP Streamable (gateway/Docker).
 - **MCPB packaging** for one-click Claude Desktop install.

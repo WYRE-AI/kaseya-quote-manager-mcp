@@ -1,10 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { salesHandler } from '../domains/sales.js';
-import { LimiterAbortError, SlidingWindowLimiter, limiterCount, limiterFor, resetLimiters, acquireForCurrentKey } from '../utils/rate-limit.js';
+import { LimiterAbortError, SlidingWindowLimiter, limiterCount, limiterFor, rememberLimiter, resetLimiters, withKeyLimiter } from '../utils/rate-limit.js';
 import { runWithCredentials } from '../utils/client.js';
 import { Run } from '../reports/run.js';
 import { runPipelineSummary } from '../reports/pipeline.js';
-import { RateLimitError } from '@wyre-ai/node-kaseya-quote-manager';
+
+const okFetch = () => vi.fn(async () => new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } }));
+const failFetch = (status: number) => vi.fn(async () => new Response('{}', { status, headers: { 'content-type': 'application/json' } }));
 
 const WINDOW = 150;
 
@@ -58,74 +60,176 @@ describe('SlidingWindowLimiter', () => {
 });
 
 describe('limiterFor', () => {
-  it('returns one limiter per key and a different one for another key', () => {
-    expect(limiterFor('key-a')).toBe(limiterFor('key-a'));
-    expect(limiterFor('key-a')).not.toBe(limiterFor('key-b'));
+  it('returns the stored limiter for a remembered key and a different one for another key', () => {
+    const a = limiterFor('key-a');
+    rememberLimiter('key-a', a);
+    expect(limiterFor('key-a')).toBe(a);
+    expect(limiterFor('key-b')).not.toBe(a);
   });
 
-  it('is bounded: the oldest keys are evicted beyond 1000', () => {
-    const first = limiterFor('key-0');
-    for (let i = 1; i <= 1100; i++) limiterFor(`key-${i}`);
-    expect(limiterCount()).toBe(1000);
-    expect(limiterFor('key-0')).not.toBe(first);
+  it('does not store an unknown key until rememberLimiter is called', () => {
+    const a = limiterFor('key-a');
+    expect(limiterCount()).toBe(0);
+    expect(limiterFor('key-a')).not.toBe(a);
+    rememberLimiter('key-a', a);
+    expect(limiterCount()).toBe(1);
+    expect(limiterFor('key-a')).toBe(a);
+  });
+
+  it('rememberLimiter keeps the stored limiter when the key is already stored', () => {
+    const a = limiterFor('key-a');
+    rememberLimiter('key-a', a);
+    rememberLimiter('key-a', new SlidingWindowLimiter(2, WINDOW));
+    expect(limiterFor('key-a')).toBe(a);
+    expect(limiterCount()).toBe(1);
+  });
+
+  it('defaults to a cap of 10,000 keys', () => {
+    for (let i = 0; i < 10_001; i++) rememberLimiter(`key-${i}`, new SlidingWindowLimiter(2, WINDOW));
+    expect(limiterCount()).toBe(10_000);
+  });
+
+  describe('failed and successful requests', () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it.each([401, 500])('a plain call that fails with %i does not store the key', async (status) => {
+      vi.stubGlobal('fetch', failFetch(status));
+      await runWithCredentials({ apiKey: 'bad-key' }, async () => {
+        await expect(salesHandler.handleCall('kqm_quote_list', {})).rejects.toBeDefined();
+      });
+      expect(limiterCount()).toBe(0);
+    });
+
+    it('a report run whose requests all fail does not store the key', async () => {
+      vi.stubGlobal('fetch', failFetch(500));
+      await runWithCredentials({ apiKey: 'bad-key' }, async () => {
+        await expect(runPipelineSummary({})).rejects.toBeDefined();
+      });
+      expect(limiterCount()).toBe(0);
+    });
+
+    it('a successful plain call stores the key', async () => {
+      vi.stubGlobal('fetch', okFetch());
+      await runWithCredentials({ apiKey: 'good-key' }, () => salesHandler.handleCall('kqm_quote_list', {}));
+      expect(limiterCount()).toBe(1);
+    });
+
+    it('a successful report run stores the key once', async () => {
+      vi.stubGlobal('fetch', okFetch());
+      await runWithCredentials({ apiKey: 'good-key' }, async () => {
+        const run = new Run({ maxCalls: 10 });
+        await run.one(async () => 1);
+        await run.one(async () => 1);
+        run.close();
+      });
+      expect(limiterCount()).toBe(1);
+    });
+
+    it('a run with an injected limiter does not store the key', async () => {
+      await runWithCredentials({ apiKey: 'injected' }, async () => {
+        await new Run({ maxCalls: 10, limiter: { acquire: async () => {} } }).one(async () => 1);
+      });
+      expect(limiterCount()).toBe(0);
+    });
   });
 
   describe('at the key cap', () => {
     beforeEach(() => resetLimiters({ limit: 2, windowMs: 60_000, maxKeys: 3 }));
+    afterEach(() => vi.unstubAllGlobals());
 
-    it('evicts the least recently used idle key and keeps active keys with their windows', async () => {
-      const a = limiterFor('a');
-      const b = limiterFor('b');
-      const c = limiterFor('c');
+    const fill = async (keys = ['a', 'b', 'c']) => {
+      const out = keys.map((k) => {
+        const l = limiterFor(k);
+        rememberLimiter(k, l);
+        return l;
+      });
+      return out;
+    };
+
+    it('evicts the least recently used idle key, stores the new key and keeps active keys with their windows', async () => {
+      const [a, b, c] = await fill();
       await a.acquire();
       await a.acquire();
       await c.acquire();
       // b never took a slot, so it is the only idle key.
       const d = limiterFor('d');
+      rememberLimiter('d', d);
       expect(limiterCount()).toBe(3);
       expect(limiterFor('a')).toBe(a);
       expect(limiterFor('c')).toBe(c);
-      expect(d).not.toBe(b);
+      expect(limiterFor('d')).toBe(d);
+      expect(limiterFor('b')).not.toBe(b);
       // a's window survived: it is still full.
       await expect(a.acquire(AbortSignal.timeout(30))).rejects.toBeInstanceOf(LimiterAbortError);
     });
 
-    it('picks the oldest idle key when several are idle', () => {
-      const a = limiterFor('a');
-      const b = limiterFor('b');
-      limiterFor('c');
+    it('picks the oldest idle key when several are idle', async () => {
+      const [a, b] = await fill();
       limiterFor('a'); // a is now most recently used, so b is the oldest
-      limiterFor('d');
+      rememberLimiter('d', limiterFor('d'));
       expect(limiterFor('a')).toBe(a);
       expect(limiterFor('b')).not.toBe(b);
     });
 
-    it('refuses a new key with RateLimitError when every key is active, leaving the limiters alone', async () => {
-      const existing = [limiterFor('a'), limiterFor('b'), limiterFor('c')];
-      for (const l of existing) await l.acquire();
-      expect(() => limiterFor('d')).toThrow(RateLimitError);
-      expect(limiterCount()).toBe(3);
-      expect(['a', 'b', 'c'].map((k) => limiterFor(k))).toEqual(existing);
-    });
+    describe('with every key active', () => {
+      let existing: SlidingWindowLimiter[];
+      beforeEach(async () => {
+        existing = await fill();
+        for (const l of existing) await l.acquire();
+      });
 
-    it('a report run in that state is partial with the rate-limit reason', async () => {
-      for (const k of ['a', 'b', 'c']) await limiterFor(k).acquire();
-      const fetchMock = vi.fn(async () => new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } }));
-      vi.stubGlobal('fetch', fetchMock);
-      try {
+      const expectUntouched = () => {
+        expect(limiterCount()).toBe(3);
+        ['a', 'b', 'c'].forEach((k, i) => expect(limiterFor(k)).toBe(existing[i]));
+      };
+
+      it('never refuses a new key: limiterFor returns a limiter and acquire resolves', async () => {
+        const d = limiterFor('d');
+        await expect(d.acquire()).resolves.toBeUndefined();
+        rememberLimiter('d', d);
+        expectUntouched();
+        expect(limiterFor('d')).not.toBe(d);
+      });
+
+      it("does not reset anyone's window", async () => {
+        for (const l of existing) await l.acquire(); // each now holds its full 2 slots
+        rememberLimiter('d', limiterFor('d'));
+        for (const l of existing) await expect(l.acquire(AbortSignal.timeout(30))).rejects.toBeInstanceOf(LimiterAbortError);
+      });
+
+      it('a plain tool call succeeds and leaves the table unchanged', async () => {
+        const fetchMock = okFetch();
+        vi.stubGlobal('fetch', fetchMock);
+        await runWithCredentials({ apiKey: 'newcomer' }, async () => {
+          await expect(salesHandler.handleCall('kqm_quote_list', {})).resolves.toBeDefined();
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expectUntouched();
+      });
+
+      it('a report run succeeds and leaves the table unchanged', async () => {
+        const fetchMock = okFetch();
+        vi.stubGlobal('fetch', fetchMock);
         const out = await runWithCredentials({ apiKey: 'newcomer' }, () => runPipelineSummary({}));
-        expect(out).toMatchObject({ partial: true, callsUsed: 0 });
-        expect(out.partialReason).toContain('rate limiting');
-        expect(fetchMock).not.toHaveBeenCalled();
-      } finally {
-        vi.unstubAllGlobals();
-      }
-    });
+        expect(out.partial).toBe(false);
+        expect(fetchMock).toHaveBeenCalled();
+        expectUntouched();
+      });
 
-    it('a plain tool is refused with the rate-limit error', async () => {
-      for (const k of ['a', 'b', 'c']) await limiterFor(k).acquire();
-      await runWithCredentials({ apiKey: 'newcomer' }, async () => {
-        await expect(salesHandler.handleCall('kqm_quote_list', {})).rejects.toBeInstanceOf(RateLimitError);
+      it('a run with an unstored limiter still enforces the limit within that run', async () => {
+        await runWithCredentials({ apiKey: 'newcomer' }, async () => {
+          const run = new Run({ maxCalls: 10, deadlineMs: 60 });
+          await run.one(async () => 1);
+          await run.one(async () => 1);
+          const started = Date.now();
+          // The third request needs a slot that the run's own limiter does not have until the window passes.
+          expect(await run.one(async () => 1)).toBeUndefined();
+          expect(Date.now() - started).toBeLessThan(500);
+          expect(run.envelope().partialReason).toContain('time limit');
+          expect(run.budget.used).toBe(2);
+          run.close();
+        });
+        expectUntouched();
       });
     });
   });
@@ -142,8 +246,9 @@ describe('shared across runs', () => {
   it('two Run instances with the same key share one budget of slots', async () => {
     await runWithCredentials({ apiKey: 'same-key' }, async () => {
       const a = new Run({ maxCalls: 10 });
-      const b = new Run({ maxCalls: 10 });
       expect(await timed(a)).toBeLessThan(WINDOW / 2);
+      // The key is tracked after a's first success, so b (started later) shares a's limiter.
+      const b = new Run({ maxCalls: 10 });
       expect(await timed(b)).toBeLessThan(WINDOW / 2);
       // Two slots are used between them; the third request waits for the window.
       expect(await timed(a)).toBeGreaterThanOrEqual(WINDOW - 20);
@@ -222,22 +327,28 @@ describe('plain entity tools', () => {
   });
 });
 
-describe('acquireForCurrentKey', () => {
-  it('uses the limiter of the current credentials and does nothing without credentials', async () => {
+describe('withKeyLimiter', () => {
+  it('just runs fn without credentials', async () => {
     const original = process.env.KASEYA_QUOTE_MANAGER_API_KEY;
     delete process.env.KASEYA_QUOTE_MANAGER_API_KEY;
     try {
-      await acquireForCurrentKey();
+      await expect(withKeyLimiter(undefined, async () => 'ran')).resolves.toBe('ran');
       expect(limiterCount()).toBe(0);
     } finally {
       if (original !== undefined) process.env.KASEYA_QUOTE_MANAGER_API_KEY = original;
     }
+  });
+
+  it('waits for a slot on the current key, stores the key on success and not on failure', async () => {
     await runWithCredentials({ apiKey: 'plain-key' }, async () => {
-      await acquireForCurrentKey();
-      await acquireForCurrentKey();
+      await expect(withKeyLimiter(undefined, async () => { throw new Error('boom'); })).rejects.toThrow('boom');
+      expect(limiterCount()).toBe(0);
+      await withKeyLimiter(undefined, async () => 1);
+      expect(limiterCount()).toBe(1);
+      await withKeyLimiter(undefined, async () => 1); // limit 2: the window is now full
       const controller = new AbortController();
       setTimeout(() => controller.abort(), 10);
-      await expect(acquireForCurrentKey(controller.signal)).rejects.toBeInstanceOf(LimiterAbortError);
+      await expect(withKeyLimiter(controller.signal, async () => 1)).rejects.toBeInstanceOf(LimiterAbortError);
     });
   });
 });

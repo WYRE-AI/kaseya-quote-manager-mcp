@@ -37,9 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   return a partial result with the reason (`*_get_full` returns an error if it stops before
   the main record is read). The MCP request signal now reaches the report and entity handlers.
 - One sliding-window rate limiter per API key (60 a minute, keyed by a hash of the key, at most
-  1,000 keys) is shared by every report, `*_get_full` and list/get request. At the cap only idle
-  keys are evicted (least recently used first); if every key is active a new key gets a rate-limit
-  error (reports return partial with the rate-limit reason).
+  10,000 keys) is shared by every report, `*_get_full` and list/get request. A key is tracked only
+  after a successful response. At the cap the least recently used idle key is dropped; if every
+  key is busy, the new key gets a temporary limiter for that call or run and nobody's window is
+  reset. Requests are never refused by the limiter.
+- Minimum Node is now 22.12.0 (the SDK 1.0.5 requires it); CI tests only Node 22.x.
 - Plain list/get tools no longer retry (`maxRetries: 0`), so one limiter slot is one HTTP attempt.
 - Each report run clears its deadline timer and abort listeners when it finishes (`Run.close()`),
   including on errors.

@@ -35,9 +35,10 @@ only call `list` and `get` on the Quote Manager API.
 - **Requests.** Sequential, never retried. Every request first takes a slot from a limiter
   shared by all calls with the same API key (60 a minute, sliding window, keyed by a hash of
   the key), so concurrent runs and plain list/get tools cannot exceed it together. At most
-  1,000 keys are tracked; only idle keys (no request in the last minute) are evicted, so a
-  busy key's window is never reset. If all 1,000 keys are busy, a new key is refused as a rate
-  limit (partial result with the rate-limit reason). Each run releases its time-limit timer and
+  10,000 keys are tracked, and a key is tracked only after a successful response. At the cap
+  the least recently used idle key (no request in the last minute) is dropped, so a busy key's
+  window is never reset. If every key is busy, the new key gets a temporary limiter for that
+  call or run and nobody's window is reset. The limiter never refuses a request. Each run releases its time-limit timer and
   listeners when it finishes. Waiting for
   a slot counts against the time limit. Lists are read as 1-based pages of 100; a page with
   fewer than 100 rows ends the list.

@@ -1,7 +1,7 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { requestContext, type DomainHandler, type CallToolResult } from '../utils/types.js';
 import { getClient } from '../utils/client.js';
-import { acquireForCurrentKey } from '../utils/rate-limit.js';
+import { withKeyLimiter } from '../utils/rate-limit.js';
 import type { RunContext } from '../reports/run.js';
 import { logger } from '../utils/logger.js';
 import { okResult, errorResult } from '../render.js';
@@ -70,10 +70,11 @@ export function createEntityHandler(entities: Entity[], extras: ExtraTool[] = []
       entity.resource
     ];
     logger.info(`API call: ${entity.resource}.${match[2]}`);
-    await acquireForCurrentKey(ctx.signal);
-    if (match[2] === 'get') return okResult(await resource.get(requireId(args.id)));
-    if (entity.noParams) return okResult(await resource.list());
-    return okResult(await resource.list(pick(args, [...Object.keys(entity.filters ?? {}), 'page', 'pageSize'])));
+    return withKeyLimiter(ctx.signal, async () => {
+      if (match[2] === 'get') return okResult(await resource.get(requireId(args.id)));
+      if (entity.noParams) return okResult(await resource.list());
+      return okResult(await resource.list(pick(args, [...Object.keys(entity.filters ?? {}), 'page', 'pageSize'])));
+    });
   }
 
   return { getTools, handleCall };

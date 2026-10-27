@@ -1,7 +1,7 @@
 import { isRateLimitError } from '../errors.js';
 import { intProp, type Prop } from '../domains/schema.js';
 import { getCredentials } from '../utils/client.js';
-import { limiterFor } from '../utils/rate-limit.js';
+import { limiterFor, rememberLimiter, type SlidingWindowLimiter } from '../utils/rate-limit.js';
 import type { RequestContext } from '../utils/types.js';
 import { BudgetExhausted, CallBudget, RunAborted, paginate, PAGE_SIZE, DEFAULT_MAX_CALLS, MAX_CALLS_LIMIT, type PageResult, type StopReason } from './budget.js';
 
@@ -57,8 +57,8 @@ export interface RunOptions extends RunContext {
 }
 
 /**
- * Abort when any input aborts. AbortSignal.any needs Node 20.3; older 20.x gets a manual join,
- * whose listeners on the source signals are removed by `cleanup`.
+ * Abort when any input aborts. AbortSignal.any always exists on supported Node (>=22.12); the manual join is a defensive
+ * fallback for runtimes without it, and its listeners on the source signals are removed by `cleanup`.
  */
 function anySignal(signals: AbortSignal[]): { signal: AbortSignal; cleanup: () => void } {
   if (typeof AbortSignal.any === 'function') return { signal: AbortSignal.any(signals), cleanup: () => {} };
@@ -96,6 +96,9 @@ export class Run {
   private readonly signal: AbortSignal;
   private readonly deadline: AbortController;
   private readonly limiter?: { acquire(signal?: AbortSignal): Promise<void> };
+  private readonly apiKey?: string;
+  private readonly keyLimiter?: SlidingWindowLimiter;
+  private remembered = false;
   private readonly timer: ReturnType<typeof setTimeout>;
   private readonly cleanups = new Set<() => void>();
   private isClosed = false;
@@ -109,13 +112,10 @@ export class Run {
     } else {
       const creds = getCredentials();
       if (creds) {
-        try {
-          this.limiter = limiterFor(creds.apiKey);
-        } catch (err) {
-          // No limiter could be made for this key (server at its key cap): the first request fails as a rate limit.
-          if (!isRateLimitError(err)) throw err;
-          this.limiter = { acquire: () => Promise.reject(err) };
-        }
+        // Held for the whole run, so one run shares one limiter even when the key is not tracked yet.
+        this.apiKey = creds.apiKey;
+        this.keyLimiter = limiterFor(creds.apiKey);
+        this.limiter = this.keyLimiter;
       }
     }
     // A plain timer, held by this run: AbortSignal.timeout inside AbortSignal.any can fire late or be collected.
@@ -180,7 +180,14 @@ export class Run {
       this.signal.addEventListener('abort', onAbort, { once: true });
       this.cleanups.add(detach);
       request.then(
-        (value) => { detach(); resolve(value); },
+        (value) => {
+          detach();
+          if (!this.remembered && this.apiKey !== undefined && this.keyLimiter) {
+            this.remembered = true;
+            rememberLimiter(this.apiKey, this.keyLimiter);
+          }
+          resolve(value);
+        },
         (err) => { detach(); reject(err); },
       );
     });

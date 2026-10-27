@@ -1,10 +1,9 @@
 import { createHash } from 'node:crypto';
-import { RateLimitError } from '@wyre-ai/node-kaseya-quote-manager';
 import { getCredentials } from './client.js';
 
 export const RATE_LIMIT_REQUESTS = 60;
 export const RATE_LIMIT_WINDOW_MS = 60_000;
-const DEFAULT_MAX_KEYS = 1000;
+const DEFAULT_MAX_KEYS = 10_000;
 
 /** Rejected by `acquire` when its signal aborts while waiting for a slot. */
 export class LimiterAbortError extends Error {
@@ -62,38 +61,58 @@ interface LimiterConfig { limit: number; windowMs: number; maxKeys: number }
 const DEFAULT_CONFIG: LimiterConfig = { limit: RATE_LIMIT_REQUESTS, windowMs: RATE_LIMIT_WINDOW_MS, maxKeys: DEFAULT_MAX_KEYS };
 
 // One limiter per API key, keyed by a hash so the raw key is never stored.
-// At the cap, the least recently used idle key (no slot inside its window) is evicted; if every key is active, new keys are refused.
+// A key is tracked only after a request through its limiter succeeded (see rememberLimiter), so bad keys never fill the table.
+// At the cap, the least recently used idle key (no slot inside its window) is dropped; if every key is busy, the new key
+// keeps a temporary limiter for that call or run and nobody's window is reset. The limiter never refuses a request.
 const limiters = new Map<string, SlidingWindowLimiter>();
 let config = DEFAULT_CONFIG;
 
+const keyId = (apiKey: string): string => createHash('sha256').update(apiKey).digest('hex');
+
+/** The stored limiter for this key (marked most recently used), or a new unstored one. Never throws, never evicts. */
 export function limiterFor(apiKey: string): SlidingWindowLimiter {
-  const id = createHash('sha256').update(apiKey).digest('hex');
-  let limiter = limiters.get(id);
-  if (limiter) {
-    limiters.delete(id);
-  } else {
-    if (limiters.size >= config.maxKeys) {
-      // Map order is least recently used first.
-      const idle = [...limiters].find(([, l]) => l.isIdle());
-      if (!idle) {
-        throw new RateLimitError(
-          'Too many API keys are active on this server right now, so this request was refused. Wait a minute and try again.',
-          Math.ceil(config.windowMs / 1000),
-          undefined,
-        );
-      }
-      limiters.delete(idle[0]);
-    }
-    limiter = new SlidingWindowLimiter(config.limit, config.windowMs);
-  }
-  limiters.set(id, limiter);
-  return limiter;
+  const id = keyId(apiKey);
+  const stored = limiters.get(id);
+  if (!stored) return new SlidingWindowLimiter(config.limit, config.windowMs);
+  limiters.delete(id);
+  limiters.set(id, stored);
+  return stored;
 }
 
-/** Wait for a slot on the limiter of the current request's credentials. No credentials: no wait. */
-export async function acquireForCurrentKey(signal?: AbortSignal): Promise<void> {
+/**
+ * Track `limiter` for this key. Call only after a request through it succeeded.
+ * Already tracked: nothing changes. At the cap: drops the least recently used idle key; if none is idle, the limiter stays temporary.
+ */
+export function rememberLimiter(apiKey: string, limiter: SlidingWindowLimiter): void {
+  const id = keyId(apiKey);
+  if (limiters.has(id)) return;
+  if (limiters.size >= config.maxKeys) {
+    // Map order is least recently used first; stop at the first idle key without copying the table.
+    let idle: string | undefined;
+    for (const [key, l] of limiters) {
+      if (l.isIdle()) {
+        idle = key;
+        break;
+      }
+    }
+    if (idle === undefined) return;
+    limiters.delete(idle);
+  }
+  limiters.set(id, limiter);
+}
+
+/**
+ * Run `fn` under the limiter of the current request's credentials: wait for a slot, run, and track the key if it succeeded.
+ * No credentials: just run `fn`.
+ */
+export async function withKeyLimiter<T>(signal: AbortSignal | undefined, fn: () => Promise<T>): Promise<T> {
   const creds = getCredentials();
-  if (creds) await limiterFor(creds.apiKey).acquire(signal);
+  if (!creds) return fn();
+  const limiter = limiterFor(creds.apiKey);
+  await limiter.acquire(signal);
+  const result = await fn();
+  rememberLimiter(creds.apiKey, limiter);
+  return result;
 }
 
 /** Test hook: drop every limiter and set the limit and window used for new ones. With no argument, restores the defaults. */
