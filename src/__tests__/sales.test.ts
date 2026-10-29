@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../utils/client.js', () => ({ getClient: vi.fn() }));
+vi.mock('../utils/client.js', () => ({ getClient: vi.fn(), getCredentials: vi.fn(() => ({ apiKey: 'k' })) }));
 
 import { getClient } from '../utils/client.js';
 import { salesHandler } from '../domains/sales.js';
 import { createMockClient, type MockClient } from './helpers/mock-client.js';
+import { unwrap } from './helpers/unwrap.js';
+import { UNKNOWN_TOOL_MESSAGE } from '../errors.js';
 
 describe('sales domain handler', () => {
   let client: MockClient;
@@ -31,7 +33,7 @@ describe('sales domain handler', () => {
       pageSize: 50,
       modifiedAfter: '2024-01-01T00:00:00Z',
     });
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_quote_list omits unset filters (passes undefined, not defaults)', async () => {
@@ -52,7 +54,7 @@ describe('sales domain handler', () => {
     const result = await salesHandler.handleCall('kqm_quote_get', { id: 42 });
 
     expect(client.quotes.get).toHaveBeenCalledWith(42);
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_quote_section_list maps quoteID + pagination', async () => {
@@ -62,7 +64,7 @@ describe('sales domain handler', () => {
     const result = await salesHandler.handleCall('kqm_quote_section_list', { quoteID: 42, page: 1, pageSize: 10 });
 
     expect(client.quoteSections.list).toHaveBeenCalledWith({ quoteID: 42, page: 1, pageSize: 10 });
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_quote_section_get maps id', async () => {
@@ -72,7 +74,7 @@ describe('sales domain handler', () => {
     const result = await salesHandler.handleCall('kqm_quote_section_get', { id: 5 });
 
     expect(client.quoteSections.get).toHaveBeenCalledWith(5);
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_quote_line_list maps quoteSectionID + pagination', async () => {
@@ -82,7 +84,7 @@ describe('sales domain handler', () => {
     const result = await salesHandler.handleCall('kqm_quote_line_list', { quoteSectionID: 5, page: 1, pageSize: 10 });
 
     expect(client.quoteLines.list).toHaveBeenCalledWith({ quoteSectionID: 5, page: 1, pageSize: 10 });
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_quote_line_get maps id', async () => {
@@ -92,7 +94,7 @@ describe('sales domain handler', () => {
     const result = await salesHandler.handleCall('kqm_quote_line_get', { id: 9 });
 
     expect(client.quoteLines.get).toHaveBeenCalledWith(9);
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_sales_order_list maps every filter/pagination arg', async () => {
@@ -112,7 +114,7 @@ describe('sales domain handler', () => {
       pageSize: 25,
       modifiedAfter: '2024-06-01T00:00:00Z',
     });
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_sales_order_get maps id', async () => {
@@ -122,7 +124,7 @@ describe('sales domain handler', () => {
     const result = await salesHandler.handleCall('kqm_sales_order_get', { id: 7 });
 
     expect(client.salesOrders.get).toHaveBeenCalledWith(7);
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_sales_order_line_list maps salesOrderID + filters', async () => {
@@ -142,7 +144,7 @@ describe('sales domain handler', () => {
       pageSize: 10,
       modifiedAfter: '2024-06-01T00:00:00Z',
     });
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_sales_order_line_get maps id', async () => {
@@ -152,7 +154,7 @@ describe('sales domain handler', () => {
     const result = await salesHandler.handleCall('kqm_sales_order_line_get', { id: 11 });
 
     expect(client.salesOrderLines.get).toHaveBeenCalledWith(11);
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_sales_order_payment_list maps salesOrderID + filters', async () => {
@@ -172,7 +174,7 @@ describe('sales domain handler', () => {
       pageSize: 10,
       modifiedAfter: '2024-06-01T00:00:00Z',
     });
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_sales_order_payment_get maps id', async () => {
@@ -182,12 +184,13 @@ describe('sales domain handler', () => {
     const result = await salesHandler.handleCall('kqm_sales_order_payment_get', { id: 21 });
 
     expect(client.salesOrderPayments.get).toHaveBeenCalledWith(21);
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('returns isError for an unrecognized tool name (without ever touching the client resources)', async () => {
     const result = await salesHandler.handleCall('kqm_bogus_tool', {});
-    expect(result).toEqual({ content: [{ type: 'text', text: 'Unknown tool: kqm_bogus_tool' }], isError: true });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(UNKNOWN_TOOL_MESSAGE);
   });
 
   it('propagates a rejected API call rather than swallowing it', async () => {

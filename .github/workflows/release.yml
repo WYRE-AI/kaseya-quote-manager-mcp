@@ -1,10 +1,8 @@
 name: Release
 
+# Release is manual-only for now.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 # Thin caller for the canonical reusable release pipeline. The build →
 # semantic-release → Docker → MCP Registry → security chain (tag-based release

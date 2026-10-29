@@ -2,7 +2,7 @@
 
 [![Build Status](https://github.com/WYRE-AI/kaseya-quote-manager-mcp/actions/workflows/release.yml/badge.svg)](https://github.com/WYRE-AI/kaseya-quote-manager-mcp/actions/workflows/release.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22.12.0-brightgreen.svg)](https://nodejs.org/)
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that gives AI
 assistants **read-only** access to [Kaseya Quote Manager](https://help.quotemanager.kaseya.com/)
@@ -31,11 +31,26 @@ claude mcp add kaseya-quote-manager-mcp \
 Quote Manager authenticates with a single **API key** sent in the `apiKey` header. Generate
 one in Quote Manager under **Settings → API**.
 
-Stdio and `AUTH_MODE=env` read `KASEYA_QUOTE_MANAGER_API_KEY`. The HTTP transport does not
-start unless `CONDUIT_S2S_SECRET` is a real value. Known placeholders (`changeme`,
-`change-me`, `secret`, `example`, `placeholder`, `replace-me`, `your-secret`,
-`your-s2s-secret`, `s2s-secret`, `replace-with-a-real-secret`) are rejected, including when
-`MCP_ALLOW_INSECURE_DEV=1` is set. The process never logs the secret.
+Stdio and HTTP `AUTH_MODE=env` read `KASEYA_QUOTE_MANAGER_API_KEY`. The HTTP transport does
+not start unless `CONDUIT_S2S_SECRET` is a real value of **at least 32 characters**
+(`openssl rand -hex 32`). Known placeholders (`changeme`, `change-me`, `secret`, `example`,
+`placeholder`, `replace-me`, `your-secret`, `your-s2s-secret`, `s2s-secret`,
+`replace-with-a-real-secret`) are rejected, including when `MCP_ALLOW_INSECURE_DEV=1` is
+set. `MCP_ALLOW_INSECURE_DEV` itself is refused unless `NODE_ENV` is exactly `development` (no spaces, no other case). The process
+never logs the secret.
+
+### Auth mode (HTTP)
+
+`AUTH_MODE` is read when the HTTP server starts:
+
+| Value | Behavior |
+|-------|----------|
+| unset or empty (after trimming) | `gateway` |
+| `gateway` | Every `/mcp` request must carry `X-Kaseya-Quote-Manager-Api-Key`. The environment variable is never read. |
+| `env` | Tools use `KASEYA_QUOTE_MANAGER_API_KEY` from the process environment. |
+| anything else (`Gateway`, `ENV`, `standalone`, …) | The server logs an error and exits non-zero. Only the exact values `gateway` and `env` are accepted. |
+
+Stdio ignores `AUTH_MODE` and reads `KASEYA_QUOTE_MANAGER_API_KEY`.
 
 ### HTTP authentication
 
@@ -51,12 +66,73 @@ appears in the header), keyed with `CONDUIT_S2S_SECRET`, encoded as 64 lowercase
 characters. The timestamp must be within 300 seconds of the server clock. A missing or
 invalid header returns 401.
 
-In `AUTH_MODE=gateway` (the container image and Compose default), `/mcp` also requires
-`X-Kaseya-Quote-Manager-Api-Key`. That header is the only credential for the request. A
-request without it returns 401 and does not fall back to `KASEYA_QUOTE_MANAGER_API_KEY`.
+In `AUTH_MODE=gateway` (the default, and the container image and Compose setting), `/mcp`
+also requires `X-Kaseya-Quote-Manager-Api-Key`. That header is the only credential for the
+request. A request without it returns 401 and does not fall back to
+`KASEYA_QUOTE_MANAGER_API_KEY`.
+
+**Request body cap.** After the S2S check, a request whose `Content-Length` is over
+256 KiB (262144 bytes) gets `413` with the JSON-RPC error
+`{"jsonrpc":"2.0","error":{"code":-32600,"message":"Request body exceeds 262144 bytes"},"id":null}`.
+The transport enforces the same cap on chunked bodies. An unauthenticated oversize request
+still gets `401`.
 
 `/health` stays unauthenticated, does not require `X-Gateway-S2S`, and does not return the
-API key. The stdio transport does not use `CONDUIT_S2S_SECRET`.
+API key. Its `configured` flag is a presence check that is only ever true in `env` mode. The
+stdio transport does not use `CONDUIT_S2S_SECRET`.
+
+## Tool call hardening
+
+- **Strict inputs.** Every tool schema has `additionalProperties: false`. IDs (`id`,
+  `quoteID`, `salesOrderID`, …) are integers of at least 1, `page` is 1–10,000, `pageSize`
+  is 1–100, and strings have a `maxLength`. `modifiedAfter` must be strict ISO 8601:
+  `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM[:SS[.fff]]` with an optional `Z` or `±HH:MM`; forms like
+  `March 5`, `2026/01/31` or `2026-02-30` are refused. A call is checked before it runs; an unknown
+  argument, a missing required argument, or a bad value returns a fixed message that names
+  the schema property and never echoes what you sent. Tool input with more than 10,000
+  values is refused.
+- **Untrusted content envelope.** Quote titles, notes, customer and contact names, addresses
+  and delivery instructions are written by customers and staff. Every successful result is
+  wrapped as `<untrusted-content nonce="…">…</untrusted-content nonce="…">` with a notice not
+  to follow instructions inside it. Forged `untrusted-content` markers in the data are
+  defanged; nothing else is changed (no HTML escaping).
+- **100 KB response cap.** The whole result text, envelope and truncation note included, is at
+  most 102,400 bytes. Output over that is cut on a character boundary and ends with
+  `[TRUNCATED: the result was larger than 100 KB, so the rest was cut. Ask for less: a smaller pageSize, top or record limit, a later page, or narrower filters such as modifiedAfter. For a *_get_full tool, read the child records with their list tools instead.]`
+  inside the envelope.
+- **Fixed error text.** Errors are short fixed sentences (for example "Quote Manager
+  rejected the API key."). Upstream bodies, URLs and your arguments are never returned or
+  logged. Startup failures log only the error type and a message of at most 200 characters,
+  and a bad `AUTH_MODE` is refused without printing its value.
+
+## Rate budget
+
+Quote Manager allows **60 requests a minute and 10,000 a day** per API key, shared with every
+other integration using that key. The server limits itself to 60 a minute **per API key**
+across all concurrent requests (a sliding window shared by every tool call that uses the
+key; the key is only held as a hash). It does not count the daily total, so plan for it: a
+few report runs a day is fine, a loop is not.
+
+Report tools take `maxCalls` (1–120, default **60**). Every Quote Manager request a report
+makes counts as one call, and the report stops and returns partial results when the budget
+is spent. Reports and `*_get_full` tools never retry (`maxRetries: 0`), so one call is exactly
+one HTTP attempt. They also stop at an overall **75-second time limit**, or as soon as the
+client cancels the request, and return `partial: true` with the reason. The Quote Manager SDK
+cannot cancel a request in flight, so a request that is already running is left to finish
+and its result is dropped. Roughly:
+
+| Report | Calls |
+|--------|-------|
+| `kqm_pipeline_summary` (50 quotes) | 1 + 50 + one per selected section (about 100–150), plus at least one per distinct product with `includeCost` (one per 100 supplier links) |
+| `kqm_quote_conversion_funnel` (500 quotes) | 5 pages, plus one per converted quote with `useOrderDate` |
+| `kqm_sales_order_margin_report` (50 orders) | 1 + 50 |
+| `kqm_customer_spend_summary` (100 orders) | 1 + 2 per order scanned for the customer (about 201) |
+| `kqm_product_velocity_report` (2,000 lines) | 20 line pages, then order pages with `includeCustomers` from the calls left over |
+| `kqm_purchase_vs_sales_reconciliation` | 1 + purchase order pages + one per matching purchase order |
+
+The default of 60 calls is small on purpose: bigger runs return `partial: true` with a
+`partialReason` instead of spending your daily allowance. Raise `maxCalls` or narrow with `modifiedAfter` and the per-report limits to fit. See
+[docs/REPORTS.md](docs/REPORTS.md) for the exact formulas.
 
 ## Configuration
 
@@ -66,9 +142,9 @@ Copy [`.env.example`](.env.example).
 |----------|----------|-------------|
 | `KASEYA_QUOTE_MANAGER_API_KEY` | For stdio and `AUTH_MODE=env` | Quote Manager API key. Gateway mode does not read this. |
 | `MCP_TRANSPORT` | No | `stdio` (default) or `http` |
-| `AUTH_MODE` | No | `gateway` (Docker image and Compose default) or `env`. Gateway mode requires `X-Kaseya-Quote-Manager-Api-Key` on each `/mcp` request and never falls back to the environment variable. |
-| `CONDUIT_S2S_SECRET` | Yes for HTTP | Service-to-service secret. The HTTP server logs an error and exits non-zero when this is empty or a known placeholder. Compose will not start without it. Never commit a real value. |
-| `MCP_ALLOW_INSECURE_DEV` | No | Set to exactly `1` only for local development to start HTTP without `CONDUIT_S2S_SECRET`. The process logs a warning, does not enforce `X-Gateway-S2S`, and binds `127.0.0.1` only. A non-loopback `MCP_HTTP_HOST` is overridden and logged. A placeholder secret still refuses to start. |
+| `AUTH_MODE` | No | HTTP only. Unset or empty means `gateway`. Exactly `gateway` or `env`; any other value refuses to start. Gateway mode requires `X-Kaseya-Quote-Manager-Api-Key` on each `/mcp` request and never reads the environment variable. |
+| `CONDUIT_S2S_SECRET` | Yes for HTTP | Service-to-service secret, at least 32 characters. The HTTP server logs an error and exits non-zero when this is empty, shorter than 32 characters, or a known placeholder. Compose will not start without it. Never commit a real value. |
+| `MCP_ALLOW_INSECURE_DEV` | No | Set to exactly `1` only for local development, and only with `NODE_ENV` exactly `development` (any other value, including `Development` or a padded value, refuses to start), to start HTTP without `CONDUIT_S2S_SECRET`. The process logs a warning, does not enforce `X-Gateway-S2S`, and binds `127.0.0.1` only. A non-loopback `MCP_HTTP_HOST` is overridden and logged. A placeholder or short secret still refuses to start. |
 | `MCP_HTTP_HOST` | No | Bind address when a secret is configured. Defaults to `127.0.0.1`. The container image sets `0.0.0.0`. Ignored in favor of `127.0.0.1` when the insecure-dev bypass is on. |
 | `MCP_HTTP_PORT` | No | HTTP port. Defaults to `8080`. |
 | `LOG_LEVEL` | No | `debug`, `info`, `warn`, or `error`. Defaults to `info`. |
@@ -77,9 +153,13 @@ Copy [`.env.example`](.env.example).
 
 - **Read-only by design** — the Quote Manager API exposes only `list`/`get`; no tool can
   mutate your data.
-- **39 entity tools** across 5 domains, plus `kqm_navigate` / `kqm_status` discovery tools.
+- **39 entity tools** across 5 domains, plus 3 `*_get_full` convenience tools, 6 read-only
+  report tools, and `kqm_navigate` / `kqm_status` discovery tools.
+- **Hardened tool calls** — strict input schemas, untrusted-content envelope, 100 KB response
+  cap, fixed error messages. See [Tool call hardening](#tool-call-hardening).
 - **Decision-tree navigation** — call `kqm_navigate` to explore a domain's tools.
-- **Rate limiting** — respects the API's 60 req/min limit, with retry on 429/5xx.
+- **Rate limiting** — respects the API's 60 req/min limit with one shared limiter per API key; plain list/get calls, reports and `*_get_full` tools never retry (one limiter slot is one HTTP attempt); a key is tracked only after a successful response (at most 10,000 keys; at the cap the least recently used idle key is dropped, and if every key is busy the new key gets a temporary limiter), so the limiter never refuses a request; and
+  call budgets on every report. See [Rate budget](#rate-budget).
 - **Dual transport** — stdio (local) and HTTP Streamable (gateway/Docker).
 - **MCPB packaging** for one-click Claude Desktop install.
 
@@ -94,9 +174,36 @@ Tools are named `kqm_<entity>_list` and `kqm_<entity>_get`.
 | `catalog` | product, product_image (list only), category, brand |
 | `crm` | customer, customer_address, contact |
 | `org` | employee, warehouse |
+| `reports` | the 6 report tools below |
 
 `list` tools accept `page`, `pageSize` (max 100), and `modifiedAfter` where supported, plus
 entity-specific filters (e.g. `quoteNumber`, `customerID`, `purchaseOrderID`).
+
+Convenience tools that make several requests and return nested records (inputs: `id`,
+`maxCalls`, default 60; partial results when the budget runs out):
+
+- `kqm_quote_get_full` (`sales`) — quote, its sections, and each section's lines.
+- `kqm_sales_order_get_full` (`sales`) — sales order, lines, and payments.
+- `kqm_purchase_order_get_full` (`procurement`) — purchase order, lines, and costs.
+
+## Reports
+
+Read-only tools in the `reports` domain. Each takes `maxCalls` (default 60, max 120) and
+returns `partial`, `partialReason`, `callsUsed`, `generatedAt` and `method` alongside its
+numbers. `partial` and `partialReason` come first in the JSON so they survive truncation.
+The `*_get_full` tools also return `complete`, which says per child list (and, for quotes,
+per section as `linesComplete`) whether it was read to its end. Money is rounded to 2 decimals; totals are before tax and discounts and exclude
+delivery unless stated. Several figures are inferred from fields Quote Manager does not
+document, and each report's `method` says which. Full details: [docs/REPORTS.md](docs/REPORTS.md).
+
+| Tool | What it answers |
+|------|-----------------|
+| `kqm_pipeline_summary` | Quote count, value and (optionally) estimated cost and margin by raw status code |
+| `kqm_quote_conversion_funnel` | Conversion rate, inferred win rate, expired unconverted quotes, average days to close |
+| `kqm_sales_order_margin_report` | Revenue, cost and margin per sales order, from line price and cost |
+| `kqm_customer_spend_summary` | Revenue, cost, payments and estimated outstanding by customer, top N |
+| `kqm_product_velocity_report` | Best-selling products by units and revenue, with distinct orders and customers |
+| `kqm_purchase_vs_sales_reconciliation` | For one sales order: sold vs purchased vs received, by product |
 
 ## Usage example
 

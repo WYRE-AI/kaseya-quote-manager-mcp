@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../utils/client.js', () => ({ getClient: vi.fn() }));
+vi.mock('../utils/client.js', () => ({ getClient: vi.fn(), getCredentials: vi.fn(() => ({ apiKey: 'k' })) }));
 
 import { getClient } from '../utils/client.js';
 import { procurementHandler } from '../domains/procurement.js';
 import { createMockClient, type MockClient } from './helpers/mock-client.js';
+import { unwrap } from './helpers/unwrap.js';
+import { UNKNOWN_TOOL_MESSAGE } from '../errors.js';
 
 describe('procurement domain handler', () => {
   let client: MockClient;
@@ -31,7 +33,7 @@ describe('procurement domain handler', () => {
       pageSize: 20,
       modifiedAfter: '2024-01-01T00:00:00Z',
     });
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_purchase_order_get maps id', async () => {
@@ -41,7 +43,7 @@ describe('procurement domain handler', () => {
     const result = await procurementHandler.handleCall('kqm_purchase_order_get', { id: 1 });
 
     expect(client.purchaseOrders.get).toHaveBeenCalledWith(1);
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_purchase_order_line_list maps purchaseOrderID + filters', async () => {
@@ -61,7 +63,7 @@ describe('procurement domain handler', () => {
       pageSize: 10,
       modifiedAfter: '2024-01-01T00:00:00Z',
     });
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_purchase_order_line_get maps id', async () => {
@@ -71,7 +73,7 @@ describe('procurement domain handler', () => {
     const result = await procurementHandler.handleCall('kqm_purchase_order_line_get', { id: 2 });
 
     expect(client.purchaseOrderLines.get).toHaveBeenCalledWith(2);
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_purchase_order_cost_list maps purchaseOrderID + filters', async () => {
@@ -91,7 +93,7 @@ describe('procurement domain handler', () => {
       pageSize: 10,
       modifiedAfter: '2024-01-01T00:00:00Z',
     });
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_purchase_order_cost_get maps id', async () => {
@@ -101,7 +103,7 @@ describe('procurement domain handler', () => {
     const result = await procurementHandler.handleCall('kqm_purchase_order_cost_get', { id: 3 });
 
     expect(client.purchaseOrderCosts.get).toHaveBeenCalledWith(3);
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_supplier_list maps pagination + modifiedAfter', async () => {
@@ -115,7 +117,7 @@ describe('procurement domain handler', () => {
     });
 
     expect(client.suppliers.list).toHaveBeenCalledWith({ page: 1, pageSize: 10, modifiedAfter: '2024-01-01T00:00:00Z' });
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_supplier_get maps id', async () => {
@@ -125,7 +127,7 @@ describe('procurement domain handler', () => {
     const result = await procurementHandler.handleCall('kqm_supplier_get', { id: 4 });
 
     expect(client.suppliers.get).toHaveBeenCalledWith(4);
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_product_supplier_list maps productID + filters', async () => {
@@ -145,7 +147,7 @@ describe('procurement domain handler', () => {
       pageSize: 10,
       modifiedAfter: '2024-01-01T00:00:00Z',
     });
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_product_supplier_get maps id', async () => {
@@ -155,12 +157,13 @@ describe('procurement domain handler', () => {
     const result = await procurementHandler.handleCall('kqm_product_supplier_get', { id: 5 });
 
     expect(client.productSuppliers.get).toHaveBeenCalledWith(5);
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('returns isError for an unrecognized tool name', async () => {
     const result = await procurementHandler.handleCall('kqm_bogus_tool', {});
-    expect(result).toEqual({ content: [{ type: 'text', text: 'Unknown tool: kqm_bogus_tool' }], isError: true });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(UNKNOWN_TOOL_MESSAGE);
   });
 
   it('propagates a rejected API call rather than swallowing it', async () => {

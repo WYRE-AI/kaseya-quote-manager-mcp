@@ -1,16 +1,18 @@
-import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
+import { createServer as createHttpServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createServer } from './server.js';
-import { runWithCredentials } from './utils/client.js';
-import { logger } from './utils/logger.js';
+import { runWithCredentials, setGatewayMode } from './utils/client.js';
+import { logger, safeError } from './utils/logger.js';
+import { MAX_REQUEST_BODY_BYTES } from './input-limits.js';
 import { verifyS2sHeader, S2S_HEADER } from './s2s-verify.js';
 
 // Conduit service-to-service auth (gateway#377 parity). HTTP startup fails
 // closed: an empty CONDUIT_S2S_SECRET, or a known placeholder, refuses to
-// boot unless MCP_ALLOW_INSECURE_DEV=1 (placeholders never qualify). That
-// bypass skips X-Gateway-S2S and binds 127.0.0.1 only. A configured secret
-// is always enforced and still honors MCP_HTTP_HOST (default 127.0.0.1).
-// The secret value is never logged. See src/s2s-verify.ts.
+// boot unless MCP_ALLOW_INSECURE_DEV=1 (placeholders never qualify), and that
+// flag is itself refused unless NODE_ENV=development. A secret under 32
+// characters also refuses. The bypass skips X-Gateway-S2S and binds 127.0.0.1
+// only. A configured secret is always enforced and still honors MCP_HTTP_HOST
+// (default 127.0.0.1). The secret value is never logged. See src/s2s-verify.ts.
 
 /** Public example values. A copied placeholder must not verify as a real secret. */
 export const KNOWN_PLACEHOLDER_SECRETS = new Set([
@@ -30,7 +32,16 @@ const LOOPBACK_HOST = '127.0.0.1';
 
 const MISSING_S2S_SECRET_ERROR =
   'Refusing to start HTTP transport: CONDUIT_S2S_SECRET is empty. ' +
-  'Set CONDUIT_S2S_SECRET, or set MCP_ALLOW_INSECURE_DEV=1 for local development only.';
+  'Set CONDUIT_S2S_SECRET, or set MCP_ALLOW_INSECURE_DEV=1 with NODE_ENV=development for local development only.';
+
+export const SHORT_S2S_SECRET_ERROR =
+  'Refusing to start HTTP transport: CONDUIT_S2S_SECRET must be at least 32 characters. ' +
+  'Generate one with `openssl rand -hex 32`.';
+
+export const INSECURE_DEV_NODE_ENV_ERROR =
+  'Refusing to start HTTP transport: MCP_ALLOW_INSECURE_DEV requires NODE_ENV=development.';
+
+const MIN_S2S_SECRET_LENGTH = 32;
 
 const PLACEHOLDER_S2S_SECRET_ERROR =
   'Refusing to start HTTP transport: CONDUIT_S2S_SECRET is a known placeholder. ' +
@@ -71,13 +82,26 @@ function refuseStart(message: string): never {
 
 /**
  * Secret for X-Gateway-S2S on /mcp. Read at HTTP startup, not module load.
- * Empty is fail-closed unless MCP_ALLOW_INSECURE_DEV=1. A known placeholder
- * always refuses, including when the dev flag is set. The secret is never logged.
+ * Empty is fail-closed unless MCP_ALLOW_INSECURE_DEV=1 (and NODE_ENV=development).
+ * A known placeholder or a secret under 32 characters always refuses, including
+ * when the dev flag is set. The secret is never logged.
  */
 function resolveS2sSecret(): string {
+  const devFlag = (process.env.MCP_ALLOW_INSECURE_DEV ?? '').trim().toLowerCase();
+  if (
+    devFlag !== '' &&
+    devFlag !== '0' &&
+    devFlag !== 'false' &&
+    process.env.NODE_ENV !== 'development'
+  ) {
+    refuseStart(INSECURE_DEV_NODE_ENV_ERROR);
+  }
   const secret = (process.env.CONDUIT_S2S_SECRET ?? '').trim();
   if (secret && KNOWN_PLACEHOLDER_SECRETS.has(secret.toLowerCase())) {
     refuseStart(PLACEHOLDER_S2S_SECRET_ERROR);
+  }
+  if (secret.length > 0 && secret.length < MIN_S2S_SECRET_LENGTH) {
+    refuseStart(SHORT_S2S_SECRET_ERROR);
   }
   if (secret) return secret;
 
@@ -88,6 +112,14 @@ function resolveS2sSecret(): string {
   }
 
   refuseStart(MISSING_S2S_SECRET_ERROR);
+}
+
+/** AUTH_MODE for HTTP: unset or empty is gateway; anything but gateway|env refuses to start. */
+export function resolveAuthMode(): 'gateway' | 'env' {
+  const mode = (process.env.AUTH_MODE ?? '').trim();
+  if (mode === '') return 'gateway';
+  if (mode === 'gateway' || mode === 'env') return mode;
+  refuseStart('Refusing to start: AUTH_MODE must be "gateway" or "env".');
 }
 
 /**
@@ -115,11 +147,13 @@ function resolveListenHost(s2sSecret: string): string {
  */
 export async function startHttpServer(): Promise<HttpServer> {
   const s2sSecret = resolveS2sSecret();
+  const authMode = resolveAuthMode();
   const port = parseInt(process.env.MCP_HTTP_PORT || '8080', 10);
   const host = resolveListenHost(s2sSecret);
-  const isGatewayMode = process.env.AUTH_MODE === 'gateway';
+  const isGatewayMode = authMode === 'gateway';
+  setGatewayMode(isGatewayMode);
 
-  const httpServer = createHttpServer(async (req, res) => {
+  const route = async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
     // /health is container LIVENESS, not credential-readiness. In gateway
@@ -127,9 +161,9 @@ export async function startHttpServer(): Promise<HttpServer> {
     // not at startup — gating this on credentials would always 503 and the
     // WYRE vendor-monitor would false-red this vendor permanently. Always
     // 200, no auth, and this handler must not read the API key. The
-    // `configured` flag is only a presence check for standalone env mode.
+    // `configured` flag is only a presence check for env mode.
     if (url.pathname === '/health') {
-      const configured = !isGatewayMode && Boolean(process.env.KASEYA_QUOTE_MANAGER_API_KEY);
+      const configured = authMode === 'env' && Boolean(process.env.KASEYA_QUOTE_MANAGER_API_KEY);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         status: 'ok',
@@ -153,6 +187,18 @@ export async function startHttpServer(): Promise<HttpServer> {
     if (s2sSecret && !verifyS2sHeader(headerValue(req.headers[S2S_HEADER]), s2sSecret)) {
       res.writeHead(401, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(S2S_UNAUTHORIZED));
+      return;
+    }
+
+    // Body cap runs only after S2S passes so unauthenticated callers still get 401.
+    const contentLength = Number(headerValue(req.headers['content-length']));
+    if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BODY_BYTES) {
+      res.writeHead(413, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        jsonrpc: '2.0',
+        error: { code: -32600, message: `Request body exceeds ${MAX_REQUEST_BODY_BYTES} bytes` },
+        id: null,
+      }));
       return;
     }
 
@@ -181,6 +227,8 @@ export async function startHttpServer(): Promise<HttpServer> {
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
         enableJsonResponse: true,
+        // Caps chunked bodies that carry no Content-Length.
+        maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
       });
       res.on('close', () => { transport.close(); server.close(); });
       await server.connect(transport);
@@ -192,6 +240,15 @@ export async function startHttpServer(): Promise<HttpServer> {
     } else {
       await handle();
     }
+  };
+
+  const httpServer = createHttpServer((req, res) => {
+    // Never log the error object: it can carry request or upstream content.
+    void route(req, res).catch(() => {
+      logger.error('HTTP request failed');
+      if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' });
+      if (!res.writableEnded) res.end(JSON.stringify({ error: 'Request failed.' }));
+    });
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -207,13 +264,18 @@ export async function startHttpServer(): Promise<HttpServer> {
   return httpServer;
 }
 
+/** Log a startup failure as type and a short message only, never the error object. */
+export function logFatalStartup(error: unknown): void {
+  logger.error('Fatal startup error', safeError(error));
+}
+
 // Entry point — check transport mode. Vitest imports this module to call
 // startHttpServer; skip the CLI entrypoint there. `node dist/http.js` still
 // starts HTTP or falls through to stdio.
 if (process.env.VITEST !== 'true') {
   if (process.env.MCP_TRANSPORT === 'http') {
     startHttpServer().catch((error) => {
-      logger.error('Fatal startup error', error);
+      logFatalStartup(error);
       process.exit(1);
     });
   } else {

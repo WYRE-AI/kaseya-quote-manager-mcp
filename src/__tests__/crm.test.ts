@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../utils/client.js', () => ({ getClient: vi.fn() }));
+vi.mock('../utils/client.js', () => ({ getClient: vi.fn(), getCredentials: vi.fn(() => ({ apiKey: 'k' })) }));
 
 import { getClient } from '../utils/client.js';
 import { crmHandler } from '../domains/crm.js';
 import { createMockClient, type MockClient } from './helpers/mock-client.js';
+import { unwrap } from './helpers/unwrap.js';
+import { UNKNOWN_TOOL_MESSAGE } from '../errors.js';
 
 describe('crm domain handler', () => {
   let client: MockClient;
@@ -21,7 +23,7 @@ describe('crm domain handler', () => {
     const result = await crmHandler.handleCall('kqm_customer_list', { page: 1, pageSize: 20, modifiedAfter: '2024-01-01T00:00:00Z' });
 
     expect(client.customers.list).toHaveBeenCalledWith({ page: 1, pageSize: 20, modifiedAfter: '2024-01-01T00:00:00Z' });
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_customer_get maps id', async () => {
@@ -31,7 +33,7 @@ describe('crm domain handler', () => {
     const result = await crmHandler.handleCall('kqm_customer_get', { id: 1 });
 
     expect(client.customers.get).toHaveBeenCalledWith(1);
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_customer_address_list maps customerID + filters', async () => {
@@ -51,7 +53,7 @@ describe('crm domain handler', () => {
       pageSize: 10,
       modifiedAfter: '2024-01-01T00:00:00Z',
     });
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_customer_address_get maps id', async () => {
@@ -61,7 +63,7 @@ describe('crm domain handler', () => {
     const result = await crmHandler.handleCall('kqm_customer_address_get', { id: 2 });
 
     expect(client.customerAddress.get).toHaveBeenCalledWith(2);
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_contact_list maps customerID + filters', async () => {
@@ -81,7 +83,7 @@ describe('crm domain handler', () => {
       pageSize: 10,
       modifiedAfter: '2024-01-01T00:00:00Z',
     });
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('kqm_contact_get maps id', async () => {
@@ -91,12 +93,13 @@ describe('crm domain handler', () => {
     const result = await crmHandler.handleCall('kqm_contact_get', { id: 3 });
 
     expect(client.contacts.get).toHaveBeenCalledWith(3);
-    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify(fixture, null, 2) }] });
+    expect(unwrap(result)).toEqual(fixture);
   });
 
   it('returns isError for an unrecognized tool name', async () => {
     const result = await crmHandler.handleCall('kqm_bogus_tool', {});
-    expect(result).toEqual({ content: [{ type: 'text', text: 'Unknown tool: kqm_bogus_tool' }], isError: true });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(UNKNOWN_TOOL_MESSAGE);
   });
 
   it('propagates a rejected API call rather than swallowing it', async () => {
