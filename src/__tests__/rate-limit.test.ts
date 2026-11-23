@@ -5,6 +5,7 @@ import {
   retryAfterSeconds,
   KqmRateLimitedError,
   MAX_TOTAL_WAIT_MS,
+  toolErrorResult,
 } from '../utils/rate-limit.js';
 
 function recorder() {
@@ -123,5 +124,61 @@ describe('withRateLimitRetry', () => {
     await expect(withRateLimitRetry(fn, r)).rejects.toBe(notFound);
     expect(fn).toHaveBeenCalledTimes(1);
     expect(r.waits).toEqual([]);
+  });
+});
+
+describe('KqmRateLimitedError', () => {
+  it('clamps the wait to at least 1 s', () => {
+    const err = new KqmRateLimitedError(0);
+    expect(err.retryAfterSeconds).toBe(1);
+    expect(err.message).toBe('Kaseya Quote Manager rate-limited the request (HTTP 429). Try again in 1 s.');
+  });
+
+  it('rounds a fractional wait up', () => {
+    expect(new KqmRateLimitedError(2.2).retryAfterSeconds).toBe(3);
+  });
+
+  it('never says "Try again in 0 s." after a Retry-After of 0', async () => {
+    const r = recorder();
+    const fn = vi.fn().mockRejectedValue(rateLimited(0));
+    const err = (await withRateLimitRetry(fn, r).catch((e: unknown) => e)) as KqmRateLimitedError;
+    expect(err).toBeInstanceOf(KqmRateLimitedError);
+    expect(err.retryAfterSeconds).toBe(1);
+    expect(err.message).toContain('Try again in 1 s.');
+  });
+});
+
+describe('toolErrorResult', () => {
+  it('adds structuredContent with the same wait as the text on a 429', async () => {
+    const r = recorder();
+    const fn = vi.fn().mockRejectedValue(rateLimited(30));
+    const err = await withRateLimitRetry(fn, r).catch((e: unknown) => e);
+    const result = toolErrorResult(err);
+    expect(result).toEqual({
+      content: [{
+        type: 'text',
+        text: 'Error: Kaseya Quote Manager rate-limited the request (HTTP 429). Try again in 30 s.',
+      }],
+      isError: true,
+      structuredContent: { error_type: 'rate_limited', retry_after_seconds: 30 },
+    });
+  });
+
+  it('reports at least 1 s in both the text and structuredContent', () => {
+    const result = toolErrorResult(new KqmRateLimitedError(0));
+    expect(result.content[0].text).toContain('Try again in 1 s.');
+    expect('structuredContent' in result && result.structuredContent).toEqual({
+      error_type: 'rate_limited',
+      retry_after_seconds: 1,
+    });
+  });
+
+  it('leaves other errors as text only', () => {
+    const result = toolErrorResult(new NotFoundError('Resource not found', {}));
+    expect(result).toEqual({
+      content: [{ type: 'text', text: 'Error: Resource not found' }],
+      isError: true,
+    });
+    expect('structuredContent' in result).toBe(false);
   });
 });

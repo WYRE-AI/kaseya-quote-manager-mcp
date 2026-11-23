@@ -14,7 +14,16 @@
 //
 // When it gives up on a 429, the error says how long to wait:
 // "Kaseya Quote Manager rate-limited the request (HTTP 429). Try again in N s."
-// Every tool is a read, so repeating a call is safe.
+// and the tool result also carries
+// structuredContent: { error_type: "rate_limited", retry_after_seconds: N },
+// with the same N, at least 1.
+//
+// SAFETY: retrying (on a 429, a 5xx or a network failure) is only safe because
+// every tool on this server is read-only, so repeating a call cannot duplicate
+// a write. A 5xx or a dropped connection may arrive after the upstream has
+// already applied a request. If a write tool is ever added, it must not go
+// through withRateLimitRetry: give it its own policy (for example, no retry, or
+// retry only a 429 that the API guarantees was not applied).
 
 export const MAX_RETRIES = 2;
 export const MAX_WAIT_MS = 10_000;
@@ -22,12 +31,35 @@ export const MAX_TOTAL_WAIT_MS = 20_000;
 export const DEFAULT_RETRY_AFTER_S = 60;
 
 export class KqmRateLimitedError extends Error {
-  constructor(public readonly retryAfterSeconds: number) {
-    super(
-      `Kaseya Quote Manager rate-limited the request (HTTP 429). Try again in ${retryAfterSeconds} s.`,
-    );
+  /** Whole seconds to wait, at least 1, so a Retry-After of 0 never says "Try again in 0 s.". */
+  public readonly retryAfterSeconds: number;
+
+  constructor(retryAfterSeconds: number) {
+    const seconds = Math.max(1, Math.ceil(retryAfterSeconds));
+    super(`Kaseya Quote Manager rate-limited the request (HTTP 429). Try again in ${seconds} s.`);
     this.name = 'KqmRateLimitedError';
+    this.retryAfterSeconds = seconds;
   }
+}
+
+/**
+ * The MCP tool result for a failed tool call. A KqmRateLimitedError also gets
+ * structuredContent with the same wait as the text, so a client can back off
+ * without parsing the message.
+ */
+export function toolErrorResult(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const result = {
+    content: [{ type: 'text' as const, text: `Error: ${message}` }],
+    isError: true as const,
+  };
+  if (error instanceof KqmRateLimitedError) {
+    return {
+      ...result,
+      structuredContent: { error_type: 'rate_limited', retry_after_seconds: error.retryAfterSeconds },
+    };
+  }
+  return result;
 }
 
 interface ErrorWithStatus {

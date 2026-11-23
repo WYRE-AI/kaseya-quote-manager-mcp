@@ -3,7 +3,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import { getNavigationTools, DOMAINS } from './domains/navigation.js';
 import { getDomainHandler } from './domains/index.js';
 import { getCredentials } from './utils/client.js';
-import { withRateLimitRetry } from './utils/rate-limit.js';
+import { withRateLimitRetry, toolErrorResult } from './utils/rate-limit.js';
 import { logger } from './utils/logger.js';
 import type { DomainName } from './utils/types.js';
 import { registerPromptHandlers } from './prompts.js';
@@ -83,10 +83,7 @@ export function createServer(): Server {
             handler.handleCall(name, (args || {}) as Record<string, unknown>, extra));
         } catch (error) {
           logger.error('Tool call failed', { tool: name, error: (error as Error).message });
-          return {
-            content: [{ type: 'text' as const, text: `Error: ${(error as Error).message}` }],
-            isError: true,
-          };
+          return toolErrorResult(error);
         }
       }
     }
