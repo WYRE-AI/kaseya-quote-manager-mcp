@@ -35,6 +35,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   target is now parsed against a fixed base, so `Host` is no longer consulted, and a target
   that still cannot be parsed gets a `400` JSON response while the server keeps running.
 
+- **Rate-limited tool calls no longer hang for minutes.** The client library retried a 429
+  up to 3 times, waiting the full `Retry-After` each time (60 s when the header is missing).
+  The client is now built with `maxRetries: 0` and the server retries instead, with a bound:
+  a 429, a 5xx or a network failure is retried at most twice; a 429 waits for its
+  `Retry-After`, and one longer than 10 s is not waited for; 5xx and network failures wait
+  1 s, then 2 s, with up to 25% jitter; each wait is at most 10 s and all waits at most 20 s.
+  When it gives up on a 429, the tool error says
+  `Kaseya Quote Manager rate-limited the request (HTTP 429). Try again in N s.`
+  and also returns `structuredContent: { error_type: "rate_limited", retry_after_seconds: N }`,
+  with the same N in both, at least 1 (a `Retry-After: 0` reports 1 s).
+  This differs from the Datto RMM server, which never retries a 429 because Datto blocks the
+  caller's IP after continued requests. Here a bounded retry (at most 2 retries and 20 s of
+  waiting in total) is safe because every KQM tool is read-only, so repeating a call after a
+  429, a 5xx or a network failure cannot duplicate a write. A future write tool must not
+  inherit this retry.
+
 - **`kqm_status` and the unknown-tool error advised calling `kqm_navigate` to
   discover tools without qualification (and `kqm_status` claimed "all tools
   available").** Conduit suppresses `*_navigate` / `*_back` at the gateway
