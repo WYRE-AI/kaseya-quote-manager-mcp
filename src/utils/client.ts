@@ -28,5 +28,6 @@ export function getClient(): KaseyaQuoteManagerClient {
   if (!creds) {
     throw new Error('No Kaseya Quote Manager credentials configured. Set KASEYA_QUOTE_MANAGER_API_KEY.');
   }
-  return new KaseyaQuoteManagerClient({ apiKey: creds.apiKey });
+  // maxRetries: 0 - withRateLimitRetry (rate-limit.ts) retries with a bound instead.
+  return new KaseyaQuoteManagerClient({ apiKey: creds.apiKey, maxRetries: 0 });
 }
