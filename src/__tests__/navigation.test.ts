@@ -43,7 +43,8 @@ describe('domain handlers', () => {
     expect(all).toContain('kqm_product_list');
     expect(all).toContain('kqm_customer_list');
     // 39 entity tools total (20 lists + 19 gets; product_image has no get)
-    expect(all.length).toBe(39);
+    // plus kqm_quote_full, which reads a quote with its sections and lines.
+    expect(all.length).toBe(40);
   });
 
   it('returns navigation help for a valid domain', async () => {

@@ -2,9 +2,25 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { DomainHandler, CallToolResult } from '../utils/types.js';
 import { getClient } from '../utils/client.js';
 import { logger } from '../utils/logger.js';
+import { quoteFull, type QuoteFullClient } from './quote-full.js';
 
 function getTools(): Tool[] {
   return [
+    {
+      name: 'kqm_quote_full',
+      description:
+        'Get one quote with all its sections and line items in one call, by quote number (for example "Q-1001") ' +
+        'or by numeric quote id. Use this to read or summarise a quote: kqm_quote_get needs the numeric id, and ' +
+        'line items otherwise have to be listed section by section. Section titles are returned as plain text. Read-only.',
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          quoteNumber: { type: 'string', description: 'The quote number people use, for example "Q-1001"' },
+          id: { type: 'number', description: 'The numeric quote id (alternative to quoteNumber)' },
+        },
+      },
+    },
     {
       name: 'kqm_quote_list',
       description: 'List quotes. Read-only. Returns up to pageSize (max 100) results per page.',
@@ -153,6 +169,12 @@ function getTools(): Tool[] {
 async function handleCall(toolName: string, args: Record<string, unknown>): Promise<CallToolResult> {
   const client = await getClient();
   switch (toolName) {
+    case 'kqm_quote_full': {
+      logger.info('API call: quote full', { quoteNumber: args.quoteNumber, id: args.id });
+      const res = await quoteFull(client as unknown as QuoteFullClient, { quoteNumber: args.quoteNumber, id: args.id });
+      if (!res.ok) return { content: [{ type: 'text', text: res.error }], isError: true };
+      return { content: [{ type: 'text', text: JSON.stringify(res.value, null, 2) }] };
+    }
     case 'kqm_quote_list': {
       logger.info('API call: quotes.list', args);
       const res = await client.quotes.list({ quoteNumber: args.quoteNumber as string | undefined, page: args.page as number | undefined, pageSize: args.pageSize as number | undefined, modifiedAfter: args.modifiedAfter as string | undefined });

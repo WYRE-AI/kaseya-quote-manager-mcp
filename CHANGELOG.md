@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - stdio and HTTP Streamable transports; gateway mode with `x-kaseya-quote-manager-api-key`
   header injection.
 - Built on `@wyre-technology/node-kaseya-quote-manager`.
+- **`kqm_quote_full` reads one quote with all its sections and line items in a single
+  call**, by quote number (as shown to people, e.g. `Q-1001`) or numeric id.
+  `kqm_quote_get` needs the numeric id, and line items are otherwise listed one section at
+  a time. Requests run sequentially in pages of 100, section titles are returned as plain
+  text, and sections and lines come back in `lineNumber` order. The `quote-detail` prompt
+  now uses it. Read-only.
 
 ### Security
 
