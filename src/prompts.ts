@@ -76,7 +76,7 @@ export function registerPromptHandlers(server: Server): void {
                   '',
                   'Use the available tools to:',
                   '1. Read the quote, its sections and their line items in one call with kqm_quote_full (quoteNumber).',
-                  '   If the result includes a note that some sections or lines were not read, say so in the breakdown.',
+                  '   If the result includes a note that a list reached its limit and more records may exist, say so in the breakdown.',
                   '2. Resolve the customer with kqm_customer_get, and the primary contact with kqm_contact_get if the quote has one.',
                   '',
                   'Present the quote header (customer, owner, status, expiry), then each section with its',

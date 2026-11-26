@@ -13,25 +13,39 @@ const MAX_PAGES = 20;
 
 type Rec = Record<string, unknown>;
 
+/**
+ * The parts of the Quote Manager client that {@link quoteFull} uses: the quote list (to find a
+ * quote by its number), the quote get (to read it in full by id), and the section and line lists.
+ */
 export interface QuoteFullClient {
   quotes: { list: (p: Rec) => Promise<unknown>; get: (id: number) => Promise<unknown> };
   quoteSections: { list: (p: Rec) => Promise<unknown> };
   quoteLines: { list: (p: Rec) => Promise<unknown> };
 }
 
+const NAMED_ENTITIES: Record<string, string> = { nbsp: ' ', lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' };
+
+/** Decodes the named entities above and decimal or hex numeric ones (`&#8211;`, `&#x2013;`) in one pass. */
+function decodeEntities(text: string): string {
+  return text.replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, (match, body: string) => {
+    if (body[0] === '#') {
+      const hex = body[1] === 'x' || body[1] === 'X';
+      const code = hex ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+      if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return match;
+      return code === 0xa0 ? ' ' : String.fromCodePoint(code);
+    }
+    return NAMED_ENTITIES[body.toLowerCase()] ?? match;
+  });
+}
+
 /** Section titles are stored as HTML; this gives readable text. */
 export function htmlToText(html: unknown): string | null {
   if (typeof html !== 'string' || html.trim() === '') return null;
-  const text = html
+  const stripped = html
     .replace(/<\s*br\s*\/?>/gi, '\n')
     .replace(/<\/(div|p|li|h[1-6])\s*>/gi, '\n')
-    .replace(/<[^>]*>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&')
+    .replace(/<[^>]*>/g, '');
+  const text = decodeEntities(stripped)
     .split('\n')
     .map((l) => l.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
@@ -39,7 +53,7 @@ export function htmlToText(html: unknown): string | null {
   return text || null;
 }
 
-/** Every page of a list call (page size 100, at most MAX_PAGES pages). */
+/** Every page of a list call (page size PAGE_SIZE, at most MAX_PAGES pages). */
 async function allPages(list: (p: Rec) => Promise<unknown>, params: Rec): Promise<{ items: Rec[]; truncated: boolean }> {
   const items: Rec[] = [];
   for (let page = 1; page <= MAX_PAGES; page++) {
@@ -67,10 +81,29 @@ function byLineNumber(a: Rec, b: Rec): number {
   return (Number(a.lineNumber) || 0) - (Number(b.lineNumber) || 0);
 }
 
+/**
+ * What {@link quoteFull} returns. `ok: false` covers only invalid arguments, a quote number that
+ * matches no quote or several, and an id that returns nothing. A failed vendor call is not turned
+ * into `ok: false`: it rejects the promise, so the caller's error handling sees the vendor's own
+ * error and status code.
+ */
 export type QuoteFullResult =
   | { ok: true; value: Rec }
   | { ok: false; error: string };
 
+/**
+ * Reads one quote with all its sections and line items.
+ *
+ * Identifier precedence: a non-empty (trimmed) `quoteNumber` selects the lookup by number, matched
+ * case-insensitively, and the match is then read in full by id. `id` is used only when no
+ * `quoteNumber` is given.
+ *
+ * Pagination: every list (the quote-number lookup, the sections, and each section's lines) is read
+ * with a page size of 100 and at most 20 pages. When a list reaches that cap, more records may
+ * exist, and the result says so in `note` (or, for a failed lookup, in the error).
+ *
+ * Errors: see {@link QuoteFullResult}. A failed vendor call rejects the returned promise.
+ */
 export async function quoteFull(
   client: QuoteFullClient,
   args: { quoteNumber?: unknown; id?: unknown }
@@ -81,26 +114,33 @@ export async function quoteFull(
     return { ok: false, error: 'Give quoteNumber (for example "Q-1001") or the numeric quote id.' };
   }
 
-  let quote: Rec | undefined;
+  const notes: string[] = [];
+  let quoteId = wantedId as number;
   if (wantedNumber) {
-    const res = await client.quotes.list({ quoteNumber: wantedNumber, page: 1, pageSize: PAGE_SIZE });
-    const found = (Array.isArray(res) ? (res as Rec[]) : []).filter(
+    const lookup = await allPages((p) => client.quotes.list(p), { quoteNumber: wantedNumber });
+    const found = lookup.items.filter(
       (q) => typeof q.quoteNumber === 'string' && q.quoteNumber.toLowerCase() === wantedNumber.toLowerCase()
     );
+    const capped = lookup.truncated
+      ? ` The lookup reached its limit of ${MAX_PAGES * PAGE_SIZE} records, so this may be incomplete.`
+      : '';
     if (found.length === 0) {
-      return { ok: false, error: `No quote with quote number "${wantedNumber}".` };
+      return { ok: false, error: `No quote with quote number "${wantedNumber}".${capped}` };
     }
     if (found.length > 1) {
-      return { ok: false, error: `${found.length} quotes have quote number "${wantedNumber}"; give the id instead (ids: ${found.map((q) => q.id).join(', ')}).` };
+      return { ok: false, error: `${found.length} quotes have quote number "${wantedNumber}"; give the id instead (ids: ${found.map((q) => q.id).join(', ')}).${capped}` };
     }
-    quote = found[0];
-  } else {
-    const res = await client.quotes.get(wantedId as number);
-    if (!res || typeof res !== 'object') return { ok: false, error: `No quote with id ${wantedId}.` };
-    quote = res as Rec;
+    if (lookup.truncated) {
+      notes.push(`The quote-number lookup reached its limit of ${MAX_PAGES * PAGE_SIZE} records, so another quote with this number may exist.`);
+    }
+    quoteId = Number(found[0].id);
   }
 
-  const quoteId = Number(quote.id);
+  // Always read the quote by id: a list row may leave out fields the full record has.
+  const res = await client.quotes.get(quoteId);
+  if (!res || typeof res !== 'object') return { ok: false, error: `No quote with id ${quoteId}.` };
+  const quote = res as Rec;
+
   const sectionsRes = await allPages((p) => client.quoteSections.list(p), { quoteID: quoteId });
   const sections: Rec[] = [];
   let lineCount = 0;
@@ -120,6 +160,9 @@ export async function quoteFull(
       lines,
     });
   }
+  if (truncated) {
+    notes.push(`A section or line list reached the limit of ${MAX_PAGES * PAGE_SIZE} records, so more sections or lines may exist.`);
+  }
 
   return {
     ok: true,
@@ -128,7 +171,7 @@ export async function quoteFull(
       sectionCount: sections.length,
       lineCount,
       sections,
-      ...(truncated ? { note: `Some sections or lines were not read (more than ${MAX_PAGES * PAGE_SIZE} in one list).` } : {}),
+      ...(notes.length ? { note: notes.join(' ') } : {}),
     },
   };
 }
