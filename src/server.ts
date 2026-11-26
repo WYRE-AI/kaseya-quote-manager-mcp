@@ -7,6 +7,21 @@ import { logger } from './utils/logger.js';
 import type { DomainName } from './utils/types.js';
 import { registerPromptHandlers } from './prompts.js';
 
+/**
+ * The text of a failed tool call. Vendor errors (KaseyaQuoteManagerError and its subclasses,
+ * such as NotFoundError and RateLimitError) carry the HTTP status in `statusCode`; it is
+ * included so the caller sees the vendor's own status, not just the message.
+ */
+export function formatToolError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  let status = (error as { statusCode?: unknown } | null)?.statusCode;
+  // The client's ServerError always sets statusCode 500 and keeps the vendor's
+  // real 5xx status only in its message ("Server error: 503"), so prefer that.
+  const vendor = /^Server error: (5\d\d)\b/.exec(message);
+  if (status === 500 && vendor) status = Number(vendor[1]);
+  return typeof status === 'number' ? `Error (HTTP ${status}): ${message}` : `Error: ${message}`;
+}
+
 export function createServer(): Server {
   const server = new Server(
     { name: 'kaseya-quote-manager-mcp', version: '1.0.0' },
@@ -82,7 +97,7 @@ export function createServer(): Server {
         } catch (error) {
           logger.error('Tool call failed', { tool: name, error: (error as Error).message });
           return {
-            content: [{ type: 'text' as const, text: `Error: ${(error as Error).message}` }],
+            content: [{ type: 'text' as const, text: formatToolError(error) }],
             isError: true,
           };
         }
