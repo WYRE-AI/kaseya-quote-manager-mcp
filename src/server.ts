@@ -14,7 +14,11 @@ import { registerPromptHandlers } from './prompts.js';
  */
 export function formatToolError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  const status = (error as { statusCode?: unknown } | null)?.statusCode;
+  let status = (error as { statusCode?: unknown } | null)?.statusCode;
+  // The client's ServerError always sets statusCode 500 and keeps the vendor's
+  // real 5xx status only in its message ("Server error: 503"), so prefer that.
+  const vendor = /^Server error: (5\d\d)\b/.exec(message);
+  if (status === 500 && vendor) status = Number(vendor[1]);
   return typeof status === 'number' ? `Error (HTTP ${status}): ${message}` : `Error: ${message}`;
 }
 
